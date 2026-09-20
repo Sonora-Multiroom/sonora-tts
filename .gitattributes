@@ -1,0 +1,14 @@
+# Normalise line endings in the repository; check out native (constitution VII)
+* text=auto
+
+*.java text
+*.xml text
+*.md text
+*.yml text
+*.yaml text
+*.ps1 text eol=crlf
+*.sh text eol=lf
+
+*.jar binary
+*.wav binary
+*.png binary

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- The parent lives in the multiroom-ai repository and is resolved from the local Maven
+         repository (~/.m2), never from a sibling directory. An empty <relativePath/> is what
+         tells Maven to skip the ../multiroom-extension-starter lookup; without it the build
+         fails before it starts. Install it with, in multiroom-ai:
+             mvn -pl multiroom-api,multiroom-extension-starter -am install -->
+    <parent>
+        <groupId>ai.multiroom</groupId>
+        <artifactId>multiroom-extension-starter</artifactId>
+        <version>0.1.18</version>
+        <relativePath/>
+    </parent>
+
+    <artifactId>multiroom-tts</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+    <name>multiroom-tts</name>
+    <description>Text-to-Speech announcement extension for the multiroom audio system</description>
+
+    <properties>
+        <extension.name>TTS Extension</extension.name>
+        <!-- NOT derived from the artifact id. `tts` is the single string three mechanisms share:
+             ExtensionScanner validates it against ^[a-z0-9-]+$, ExtensionStatusResolver reads
+             `multiroom.<id>.enabled` from it, and TtsAutoConfiguration's @ConditionalOnProperty
+             names that property literally. `multiroom-tts` here would split the on/off switch in
+             two, silently. -->
+        <extension.id>tts</extension.id>
+
+        <!-- The starter defaults this to ${project.version}, which now means *this extension's*
+             version. Pin the API version explicitly: it is what the JAR manifest advertises as
+             Require-API-Version, and what the host's compatibility check reads. -->
+        <multiroom.require_api_version>0.1.18</multiroom.require_api_version>
+
+        <!-- The starter's `remote` profile (active by default) scp's the built JAR to
+             multiroom.lan:/home/tiger/extensions. Child JARs opt in. -->
+        <skip.wagon.upload>false</skip.wagon.upload>
+
+        <!-- The starter's `local` profile copies to ${project.basedir}/../extensions, which is a
+             sibling of the module inside the monorepo. Outside it, point at the host checkout's
+             extensions directory. Override on the command line for a different checkout:
+             mvn deploy -Plocal -Dmultiroom.local-extensions-dir=... -->
+        <multiroom.local-extensions-dir>D:/projects-multiroom/multiroom-ai/extensions</multiroom.local-extensions-dir>
+    </properties>
+
+    <dependencies>
+        <!-- Everything below is `provided`: the host supplies all of it at runtime under the
+             shared classloader, and bundling any of it risks colliding with another
+             independently built extension. multiroom-api itself comes from the parent POM. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- WAV parsing uses the JDK's javax.sound.sampled (java.desktop), so multiroom-decoder
+             is deliberately absent: multiroom-api is the only artifact of the host repository on
+             this compile path. -->
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.9.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <profiles>
+        <!-- Overrides the starter's copy target, which assumes a sibling extensions directory. -->
+        <profile>
+            <id>local</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-to-extensions</id>
+                                <phase>deploy</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <copy file="${project.build.directory}/${project.build.finalName}.jar"
+                                              tofile="${multiroom.local-extensions-dir}/${project.artifactId}.jar"
+                                              overwrite="true"/>
+                                        <echo message="Copied ${project.build.finalName}.jar to ${multiroom.local-extensions-dir}"/>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

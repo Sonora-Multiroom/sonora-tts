@@ -1,0 +1,27 @@
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local run artifacts
+*.log
+tts-cache/
+
+# Spec Kit — installed tooling and local machine state, not project source.
+# .specify/memory/ is the exception: it's the authoring spec content AGENTS.md
+# documents as the authoritative view, so it stays tracked.
+.claude/skills/speckit*
+.specify/*
+!.specify/memory
