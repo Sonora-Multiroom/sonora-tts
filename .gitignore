@@ -22,6 +22,18 @@ tts-cache/
 # Spec Kit — installed tooling and local machine state, not project source.
 # .specify/memory/ is the exception: it's the authoring spec content AGENTS.md
 # documents as the authoritative view, so it stays tracked.
-.claude/skills/speckit*
+.claude/skills/speckit-**
+.gemini/commands/speckit.**
+.github/agents/speckit.**
+.github/prompts/speckit.**
+.kilocode/workflows/speckit.**
 .specify/*
-!.specify/memory
+!.specify/archive/
+!.specify/memory/
+!.specify/feature.json
+specs/archive/
+specs/drafts/
+
+# Spec Kit quality-gate checklists: useful only while a feature is being
+# specified/planned, redundant once implemented — never commit these.
+specs/*/checklists/requirements.md
