@@ -72,6 +72,19 @@
             <optional>true</optional>
             <scope>provided</scope>
         </dependency>
+        <!-- Compile-time only, for @Operation/@ApiResponse documentation annotations (T026,
+             T059): springdoc reads these reflectively at runtime, and multiroom-rest is what
+             actually bundles springdoc plus this artifact onto the shared classpath. Pinned to
+             the exact version multiroom-rest.jar ships (io.swagger.core.v3:swagger-annotations-jakarta
+             2.2.47, springdoc 2.8.17) so this module never supplies its own copy at runtime -
+             `provided` scope guarantees that, this pin just keeps compilation honest about which
+             API surface is actually available. -->
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations-jakarta</artifactId>
+            <version>2.2.47</version>
+            <scope>provided</scope>
+        </dependency>
 
         <!-- WAV parsing uses the JDK's javax.sound.sampled (java.desktop), so multiroom-decoder
              is deliberately absent: multiroom-api is the only artifact of the host repository on

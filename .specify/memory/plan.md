@@ -1,7 +1,7 @@
 # Main Implementation Plan: Sonora TTS
 
 How this repository is built and how it docks onto the host. Feature-level planning lives in
-`specs/001-tts-extension/plan.md` on the `001-tts-extension` branch.
+[specs/001-tts-extension/plan.md](../../specs/001-tts-extension/plan.md).
 
 ## Shape
 

@@ -1,0 +1,270 @@
+openapi: 3.0.3
+info:
+  title: Multiroom TTS Extension API
+  description: |
+    REST trigger interface for the TTS (Text-to-Speech) extension.
+    Accepts announcement requests, synthesizes speech via a configured provider,
+    and plays the result on a target audio output or output group.
+
+    Served by `multiroom-tts` itself, on the application's single port, mapped by core's one
+    DispatcherServlet. These paths are generated into the shared `/api-docs` document with no
+    change to `multiroom-rest`, because `019-extension-shared-classloader` widened
+    `springdoc.packages-to-scan` to `multiroom`.
+
+    The `/api/tts/**` prefix is this module's own. `/api/v2/**` is deliberately NOT used: it is
+    `multiroom-rest`'s published contract with two independently released consumers outside this
+    repository, and a second module contributing paths there could break them.
+
+    Authentication is delegated to whatever guards the application's HTTP surface — see FR-026.
+  version: 0.3.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local multiroom instance — the single unified port
+
+tags:
+  - name: Announcements
+    description: Trigger TTS announcements
+  - name: Cache
+    description: Manage the synthesized audio cache
+
+paths:
+  /api/tts/speak:
+    post:
+      tags: [Announcements]
+      summary: Trigger a TTS announcement
+      description: |
+        Synthesizes the provided text using the configured TTS provider and plays
+        the resulting audio on the specified target output or output group.
+
+        - If `providerName` is omitted, the default provider is used.
+        - If a cached audio entry exists for the same text + provider + voice + language,
+          no synthesis call is made.
+        - The announcement is queued behind any currently playing announcement on the target.
+        - Synthesis, format conversion and the cache write happen **before** this call returns;
+          only playback is asynchronous. A `202` therefore means the audio exists and is ready,
+          which is why the response can report `cacheHit`, and why a provider failure is a `503`
+          on this call rather than a silent drop after acceptance.
+      operationId: speak
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpeakRequest'
+            examples:
+              singleRoom:
+                summary: Announce to a single room
+                value:
+                  text: "Dinner is ready"
+                  targetName: "living-room"
+                  targetType: SINGLE_OUTPUT
+              allRooms:
+                summary: Announce to all rooms via an output group
+                value:
+                  text: "Motion detected in garden"
+                  targetName: "all-rooms"
+                  targetType: OUTPUT_GROUP
+              withProviderOverride:
+                summary: Use a specific provider
+                value:
+                  text: "This message uses the local provider"
+                  targetName: "kitchen"
+                  targetType: SINGLE_OUTPUT
+                  providerName: "piper-local"
+                  voice: "en_US-ryan-medium"
+                  language: "en-US"
+      responses:
+        '202':
+          description: Request accepted; playback is queued and will occur asynchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeakAcceptedResponse'
+        '400':
+          description: Invalid request (empty text, text too long, unknown target, unknown provider)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emptyText:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Text must not be blank"
+                textTooLong:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Text length 632 exceeds maximum allowed length of 500"
+                unknownTarget:
+                  value:
+                    error: TARGET_NOT_FOUND
+                    message: "No output or output group named 'bedroom' found"
+                unknownProvider:
+                  value:
+                    error: PROVIDER_NOT_FOUND
+                    message: "No provider configured with name 'my-provider'"
+        '503':
+          description: |
+            TTS provider unavailable, returned an error, or returned audio in a format the
+            system's shared converter refuses. None of these is fixable by changing the request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                providerTimeout:
+                  value:
+                    error: PROVIDER_TIMEOUT
+                    message: "Provider 'openai' did not respond within 10 seconds"
+                providerRateLimit:
+                  value:
+                    error: PROVIDER_RATE_LIMITED
+                    message: "Provider 'openai' reported rate limit exceeded (HTTP 429)"
+
+  /api/tts/cache:
+    delete:
+      tags: [Cache]
+      summary: Clear the audio cache
+      description: |
+        Deletes all cached audio files and resets the cache index.
+        Subsequent requests for any text will trigger fresh synthesis.
+        If `providerName` is specified, only entries for that provider are cleared.
+      operationId: clearCache
+      parameters:
+        - name: providerName
+          in: query
+          required: false
+          description: If specified, only clear cache entries for this provider
+          schema:
+            type: string
+          example: openai
+      responses:
+        '204':
+          description: Cache cleared successfully
+        '400':
+          description: Unknown provider name specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tts/cache/stats:
+    get:
+      tags: [Cache]
+      summary: Get audio cache statistics
+      description: Returns current cache size and entry count for observability.
+      operationId: getCacheStats
+      responses:
+        '200':
+          description: Cache statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStatsResponse'
+
+components:
+  schemas:
+    SpeakRequest:
+      type: object
+      required:
+        - text
+        - targetName
+        - targetType
+      properties:
+        text:
+          type: string
+          description: The text to synthesize and play
+          minLength: 1
+          maxLength: 500
+          example: "Dinner is ready"
+        targetName:
+          type: string
+          description: Name of the target audio output or output group
+          example: "living-room"
+        targetType:
+          type: string
+          description: |
+            Whether the target is a single output or an output group. These are the values of
+            the published API enum `multiroom.api.model.TargetType`, reused verbatim rather
+            than TTS defining its own.
+          enum: [SINGLE_OUTPUT, OUTPUT_GROUP]
+          example: SINGLE_OUTPUT
+        providerName:
+          type: string
+          description: Provider name override. If omitted, the default provider is used.
+          example: "openai"
+        voice:
+          type: string
+          description: Provider-specific voice identifier override. If omitted, the provider default is used.
+          example: "alloy"
+        language:
+          type: string
+          description: BCP 47 language tag override. If omitted, the provider default is used.
+          example: "en-US"
+
+    SpeakAcceptedResponse:
+      type: object
+      properties:
+        announcementId:
+          type: string
+          format: uuid
+          description: Unique identifier for this announcement (for logging correlation)
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        cacheHit:
+          type: boolean
+          description: Whether the audio was served from cache (true) or freshly synthesized (false)
+          example: true
+        queueDepth:
+          type: integer
+          description: Number of announcements now queued for the target (including this one)
+          example: 1
+
+    CacheStatsResponse:
+      type: object
+      properties:
+        totalEntries:
+          type: integer
+          description: Number of cached audio files
+          example: 42
+        totalSizeBytes:
+          type: integer
+          format: int64
+          description: Total size of cached audio files in bytes
+          example: 15728640
+        maxSizeBytes:
+          type: integer
+          format: int64
+          description: Configured maximum cache size in bytes
+          example: 524288000
+        entriesByProvider:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Cache entry count per provider name
+          example:
+            openai: 35
+            piper-local: 7
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code
+          enum:
+            - INVALID_REQUEST
+            - TARGET_NOT_FOUND
+            - PROVIDER_NOT_FOUND
+            - PROVIDER_TIMEOUT
+            - PROVIDER_RATE_LIMITED
+            - PROVIDER_ERROR
+            - FORMAT_NORMALIZATION_FAILED
+          example: TARGET_NOT_FOUND
+        message:
+          type: string
+          description: Human-readable error description
+          example: "No output or output group named 'bedroom' found"

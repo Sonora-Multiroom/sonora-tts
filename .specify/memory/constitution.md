@@ -14,6 +14,14 @@ Sync Impact Report:
     contract here, and no reactor enforces it on our behalf. Promoted in importance accordingly
 - Added section: Upstream Contract (the multiroom-ai coupling)
 - Templates requiring updates: none (plan/spec/tasks templates read principles at runtime)
+
+- Version: 1.0.1 (patch — clarification, no principle added, removed or redefined)
+- Generalized the fail-fast example under Core Principles: named a specific config field
+  (`piper-binary`) that no longer exists after 001-tts-extension's Piper provider moved from the
+  archived `rhasspy/piper` binary to piper1-gpl (`python3 -m piper`, no standalone executable);
+  replaced with a field-agnostic statement plus the PATH-vs-path distinction that motivated the
+  change, so the principle stops naming implementation details of one feature
+- Templates requiring updates: none
 -->
 
 # Sonora TTS Constitution
@@ -143,9 +151,11 @@ re-checks them beyond the inherited build gates**:
 - **No network or subprocess work during bean construction**: a provider is constructed, not
   contacted; a local engine is located, not executed. An unreachable endpoint at boot is a runtime
   state, not an initialisation failure, and MUST NOT abort host start-up
-- **Configuration faults DO abort start-up**: a missing API key, a `piper-binary` path that does
-  not exist, an unparseable configuration block — these are operator-fixable, so fail fast with a
-  message naming the extension, rather than failing the first announcement hours later
+- **Configuration faults DO abort start-up**: a missing API key, a configured model/binary path
+  that does not exist, an unparseable configuration block — these are operator-fixable, so fail
+  fast with a message naming the extension, rather than failing the first announcement hours later.
+  A bare command name meant to be resolved via `PATH` (e.g. `python3`) is not a path and MUST NOT
+  be checked for filesystem existence
 - **Start-up cost stays negligible**: the host budgets seconds for its entire start-up with every
   extension loaded. A measurable jump caused by this module means something is being done eagerly
   that should not be
@@ -194,4 +204,4 @@ build — it fails someone's audio system at start-up.
 - Where the two conflict on anything inside this repository, **this one wins** — it was written
   knowing there is no reactor here
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-20 | **Last Amended**: 2026-09-20
+**Version**: 1.0.1 | **Ratified**: 2026-09-20 | **Last Amended**: 2026-09-20
