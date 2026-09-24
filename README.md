@@ -6,8 +6,8 @@ Send a line of text and a target room; the extension synthesizes it through a co
 provider, caches the audio, and plays it on that output or output group.
 
 ```http
-POST /api/tts/announce
-{ "text": "Dinner is ready", "targetType": "SINGLE_OUTPUT", "target": "kitchen" }
+POST /api/tts/speak
+{ "text": "Dinner is ready", "targetName": "kitchen", "targetType": "SINGLE_OUTPUT" }
 ```
 
 ## What it is
@@ -23,7 +23,9 @@ ordinary dependency injection. It runs no web server of its own and ships no cop
 - Playback through an ephemeral registered input; the target's prior state is restored when the
   host destroys the announcement's route
 
-Status: **repository scaffold.** The feature is specified and built on the `001-tts-extension` branch.
+Status: **implemented, `mvn verify` green.** See [specs/001-tts-extension/](specs/001-tts-extension/)
+for the spec and [tasks.md](specs/001-tts-extension/tasks.md) for what's verified versus what still
+needs real audio hardware.
 
 ## Requirements
 
@@ -64,10 +66,15 @@ credentials belong there — via environment variables — and never in this rep
 
 `multiroom.tts.enabled=false` disables the extension without removing the JAR.
 
+See **[docs/configuration.md](docs/configuration.md)** for the full field reference, worked
+examples for every provider type, and how to trigger an announcement and manage the cache.
+
 ## Documentation
 
 | Document | What it covers |
 |---|---|
+| [docs/configuration.md](docs/configuration.md) | How to configure providers, cache and queue; triggering announcements |
 | [AGENTS.md](AGENTS.md) | How to work in this repository, and the rules across the repo boundary |
 | [.specify/memory/constitution.md](.specify/memory/constitution.md) | Engineering principles, the merge gate, the extension boundary |
+| [specs/001-tts-extension/](specs/001-tts-extension/) | The feature: spec, plan, tasks, contracts |
 | [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |

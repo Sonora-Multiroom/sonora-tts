@@ -34,7 +34,7 @@ restores whatever the room was doing before.
 ## Current state
 
 **Specified, not implemented.** The feature specification lives in
-`specs/001-tts-extension/` on the `001-tts-extension` branch — spec, plan, tasks, data model and the
+[specs/001-tts-extension/](../../specs/001-tts-extension/) — spec, plan, tasks, data model and the
 published REST contract. It was written in the `multiroom-ai` monorepo as `021-tts-extension` and
 moved here on 2026-09-20, before any code existed.
 
