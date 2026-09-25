@@ -84,10 +84,12 @@ the credential, or when you already have a service account's JSON key.
 1. **Create the service account in the project where the Text-to-Speech API is enabled** (step
    3): ☰ → **IAM & Admin** → **Service accounts** → **+ Create service account**. Give it a name
    such as `sonora-tts`.
-2. **Roles**: grant none at first. If the first announcement fails with `HTTP 403` and Google's
-   explanation names `serviceusage.services.use`, grant the account **Service Usage Consumer**
-   (`roles/serviceusage.serviceUsageConsumer`) on the project and try again. The **Agent Platform
-   User** role is only for Gemini voices and is not needed here.
+2. **Roles**: none. A service account in the project where the API is enabled can synthesize
+   classic voices without any role (confirmed 2026-09). Only if an announcement fails with
+   `HTTP 403` and Google's explanation names `serviceusage.services.use`, for example because the
+   account lives in a different project, grant it **Service Usage Consumer**
+   (`roles/serviceusage.serviceUsageConsumer`) on the API's project. The **Agent Platform User**
+   role is only for Gemini voices and is not needed here.
 3. **Create and download a JSON key**: open the account → **Keys** → **Add key** → **Create new
    key** → **JSON**. The browser downloads a file with `"type": "service_account"`,
    `client_email` and `private_key`. Google shows this key once; keep the file.
