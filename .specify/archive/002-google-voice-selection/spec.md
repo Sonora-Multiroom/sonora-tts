@@ -33,7 +33,7 @@ This feature does four things:
 **Not in this feature: Gemini TTS voices.** Gemini voices (model, style prompt) turned out to need
 a different Google endpoint, a different credential and a different response format. They will be
 a separate provider implementation, feature `003`. See
-[google-cloud-gemini-tts-params.md](../../docs/future/google-cloud-gemini-tts-params.md).
+[google-cloud-gemini-tts-params.md](../../../docs/future/google-cloud-gemini-tts-params.md).
 
 ## Clarifications
 

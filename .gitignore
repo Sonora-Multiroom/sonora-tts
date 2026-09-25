@@ -37,3 +37,4 @@ specs/drafts/
 # Spec Kit quality-gate checklists: useful only while a feature is being
 # specified/planned, redundant once implemented — never commit these.
 specs/*/checklists/requirements.md
+.specify/archive/*/checklists/requirements.md

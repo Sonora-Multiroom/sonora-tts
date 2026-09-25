@@ -79,11 +79,31 @@ These come from `019-extension-shared-classloader` and are the terms on which th
 
 ## Specification Sources (Speckit)
 
-- `specs/` — active feature specs. `001-tts-extension` is the feature this repository exists for
-- `.specify/memory/` — the consolidated, authoritative view: `constitution.md` first
-- After a feature merges, `/speckit-archive-run` folds its spec into `.specify/memory/`
+| Where | What |
+|---|---|
+| `.specify/memory/constitution.md` | The non-negotiable rules. Read first |
+| `.specify/memory/spec.md` | **Master spec**: what the extension does today — stories, requirements, entities, lifecycle, success criteria, merged from every archived feature |
+| `.specify/memory/plan.md` | **Master plan**: how it is built as implemented — package layout, dependencies, configuration keys, HTTP surface, architecture decisions, testing strategy |
+| `.specify/memory/changelog.md` | One entry per archived feature: what it added, its components, open tasks |
+| `specs/` | Features in progress, or merged but not yet archived |
+| `.specify/archive/` | Archived features: the original spec, plan, research, data model, contracts and tasks — the *why* behind the master documents |
 
-**Lookup order**: `specs/` → `.specify/memory/`. Never assume behaviour — read the spec.
+After a feature merges, `/speckit-archive-run` folds it into the master spec and plan, and its folder
+moves from `specs/` to `.specify/archive/`.
+
+**Lookup order**: `specs/` (for a feature not yet archived) → the master spec and plan →
+`.specify/archive/` (for the reasoning behind a decision). Never assume behaviour — read the spec.
+
+### Features
+
+| Feature | What it delivered | Version | Spec |
+|---|---|---|---|
+| `001-tts-extension` | The extension itself: announcements to an output or group, four providers (OpenAI, Google Cloud, Piper, local HTTP), on-disk LRU cache, per-target playback queue, `/api/tts/**` | 0.1.0 | [.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) |
+| `002-google-voice-selection` | Google voices by full name or engine + language + short name, checked against a per-entry voice catalogue (`INVALID_VOICE` lists the alternatives); Google's error message surfaced; pitch and speaking rate; `GET /api/tts/providers/{name}/voices` | 0.1.1 | [.specify/archive/002-google-voice-selection/](.specify/archive/002-google-voice-selection/) |
+| `003-google-service-account-auth` | `service-account-key-file` as the alternative to `api-key` for `google-cloud`: a JDK-only JWT exchange for per-entry bearer tokens, validated once at start-up, no new error code | 0.1.2 | [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) |
+| `004-gemini-tts-provider` | Gemini TTS provider | — | [specs/004-gemini-tts-provider/](specs/004-gemini-tts-provider/) — in progress |
+
+Add a row when a feature merges, and change its path when it is archived.
 
 **Do not cite spec IDs in code.** `FR-`, `SC-`, user-story (`US`) and research (`R`) numbers are
 local to one feature's `spec.md` / `research.md`, so every feature reuses them (002's `SC-004` is
@@ -91,6 +111,62 @@ not 001's). State the rule or the reason itself in the comment. A feature number
 constitution principle is unambiguous and may be named.
 
 ## Known Issues & Gotchas
+
+### ⚠️ Never Hold Key Material In A `@ConfigurationProperties` Bean
+**Issue:** A private key or token shows up in a log line or in `/actuator/configprops`.
+**Root Cause:** `TtsProviderConfig` is Lombok `@Data`, so its generated `toString` prints every
+field, and Spring's actuator can print the whole bound configuration.
+**Prevention Rule:** Configuration holds only the key file's **path**. Read the file in
+`TtsAutoConfiguration` while building the provider, keep the key in `ServiceAccountKey` (whose
+`toString` prints only the email and path), and build exception messages from classified reasons,
+never from a request or a raw response.
+
+### ⚠️ `resolveSettings` Must Stay Free Of I/O
+**Issue:** Cache hits slow down, or fail while Google is unreachable, although nothing needed
+synthesizing.
+**Root Cause:** `TtsService` calls `TtsProvider.resolveSettings` on every request, before the cache
+lookup, because the cache key is built from its result. Any network work there lands on the hit
+path.
+**Prevention Rule:** Keep resolution pure. Anything that needs the network — the Google voice
+catalogue check included — belongs in `synthesize`, which runs only on a miss.
+
+### ⚠️ Only Google Voice Keys Are Case-Folded
+**Issue:** Two voices of a local engine start sharing one cache entry and the wrong audio plays.
+**Root Cause:** Google voice names are unique regardless of case, so the Google resolver case-folds
+its `voiceKey`; a local HTTP engine may be case-sensitive.
+**Prevention Rule:** Put cache-key normalization in the provider's resolver (`voiceKey`, `pitchKey`,
+`speakingRateKey`), never in `TtsService`, and never fold case for a provider whose names can
+differ only by case.
+
+### ⚠️ Never Unregister The Announcement's Ephemeral Input
+**Issue:** `IllegalArgumentException("Input '…' is not registered")` when an announcement ends.
+**Root Cause:** The input is registered with `autoRemove = true`, so core's `AutoRemoveInputListener`
+unregisters it on the same `RouteDestroyedEvent` this module listens for. A second unregister finds
+nothing.
+**Prevention Rule:** Let `autoRemove` own the input. On completion, clean up only what is this
+module's: the route snapshot, the cache pin, any temp file.
+
+### ⚠️ A Custom Input Scheme Must Resolve To One Core Already Plays
+**Issue:** A `tts://` URI reaches the pipeline and fails with `UnsupportedSchemeException`.
+**Root Cause:** An `InputEndpointResolver` only rewrites a URI; core then needs an `InputHandler` for
+the resulting scheme, and `InputHandler` is in `multiroom.core.io`, which an extension cannot touch.
+**Prevention Rule:** `TtsInputResolver` must return a `file://` URI to a real WAV on disk. Never
+hold audio in memory expecting a resolver to stream it.
+
+### ⚠️ An Unscoped `@RestControllerAdvice` Hijacks Other Extensions' Errors
+**Issue:** `multiroom-rest` endpoints start answering in this module's `{error, message}` shape.
+**Root Cause:** Every extension's controllers share the host's one `DispatcherServlet`, so an advice
+with no scope applies to all of them.
+**Prevention Rule:** Keep `TtsExceptionHandler` scoped with `assignableTypes` to this module's
+controllers, and add each new controller to that list.
+
+### ⚠️ Piper Has No Binary, And `python-executable` Is Not A Path
+**Issue:** Start-up validation rejects `python-executable: python3`, or an operator looks for a
+`piper` executable that does not exist.
+**Root Cause:** `rhasspy/piper` is archived; piper1-gpl (`pip install piper-tts`) ships only
+`python3 -m piper`. The interpreter is normally a bare `PATH`-resolved command.
+**Prevention Rule:** Validate `model-path` and its `.onnx.json` sidecar for existence; never
+path-check or spawn `python-executable` during start-up.
 
 ### ⚠️ `extension.id` Is Not Derived From The Artifact Id
 **Issue:** The extension loads but its enable/disable switch does nothing, or the inventory reports
