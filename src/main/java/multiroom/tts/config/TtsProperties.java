@@ -25,7 +25,7 @@ import java.util.Set;
  * <p>Every default here is a field initialiser: 019 forbids a bundled {@code application.yml},
  * so this class is the only place a default may live. Validation in {@link #validate()} reads
  * configuration and the filesystem only — never the network, nor a subprocess: an
- * operator-fixable fault (missing API key, a binary path that does not exist) aborts start-up
+ * operator-fixable fault (a missing or doubly-set credential, a binary path that does not exist) aborts start-up
  * naming this extension; an unreachable-but-correctly-configured provider does not.
  */
 @Data
@@ -101,7 +101,7 @@ public class TtsProperties {
         switch (provider.getType()) {
             case OPENAI -> requireApiKey(provider);
             case GOOGLE_CLOUD -> {
-                requireApiKey(provider);
+                requireExactlyOneGoogleCredential(provider);
                 validateGoogleVoiceSelection(provider);
                 validateGoogleAudioSettings(provider);
             }
@@ -125,8 +125,9 @@ public class TtsProperties {
         }
         if (provider.getType() != ProviderType.GOOGLE_CLOUD) {
             // Never accepted and silently ignored: only google-cloud sends them.
-            rejectGoogleOnlySetting(provider, "pitch", provider.getPitch());
-            rejectGoogleOnlySetting(provider, "speaking-rate", provider.getSpeakingRate());
+            rejectGoogleOnlySetting(provider, "pitch", provider.getPitch() != null);
+            rejectGoogleOnlySetting(provider, "speaking-rate", provider.getSpeakingRate() != null);
+            rejectGoogleOnlySetting(provider, "service-account-key-file", isSet(provider.getServiceAccountKeyFile()));
         }
 
         if (provider.getTimeoutSeconds() > TIMEOUT_WARN_THRESHOLD_SECONDS) {
@@ -158,8 +159,8 @@ public class TtsProperties {
         }
     }
 
-    private static void rejectGoogleOnlySetting(TtsProviderConfig provider, String key, Double value) {
-        if (value != null) {
+    private static void rejectGoogleOnlySetting(TtsProviderConfig provider, String key, boolean set) {
+        if (set) {
             throw fault("provider '" + provider.getName() + "' sets " + key + ", which only google-cloud "
                     + "supports; a provider of type " + provider.getType() + " would ignore it");
         }
@@ -169,6 +170,24 @@ public class TtsProperties {
         if (value == null || value.isZero() || value.isNegative()) {
             throw fault("multiroom.tts." + key + " must be positive, but is " + value);
         }
+    }
+
+    /**
+     * Shape only: the key file itself is read once, when the provider is built, so a private key
+     * never sits in this bean.
+     */
+    private static void requireExactlyOneGoogleCredential(TtsProviderConfig provider) {
+        boolean apiKey = isSet(provider.getApiKey());
+        boolean keyFile = isSet(provider.getServiceAccountKeyFile());
+        if (apiKey == keyFile) {
+            throw fault("provider '" + provider.getName() + "' requires exactly one of api-key and "
+                    + "service-account-key-file" + (apiKey ? ", not both" : ""));
+        }
+    }
+
+    /** A blank value counts as unset. */
+    private static boolean isSet(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void requireApiKey(TtsProviderConfig provider) {

@@ -24,8 +24,18 @@ public class TtsProviderConfig {
     /** Set to {@code false} to disable this entry without removing it. */
     private boolean enabled = true;
 
-    /** Required for {@link ProviderType#OPENAI} and {@link ProviderType#GOOGLE_CLOUD}. */
+    /**
+     * Required for {@link ProviderType#OPENAI}. For {@link ProviderType#GOOGLE_CLOUD}, exactly one
+     * of this and {@link #serviceAccountKeyFile}.
+     */
     private String apiKey;
+
+    /**
+     * {@link ProviderType#GOOGLE_CLOUD} only: the path to a service account's JSON key, as Google
+     * issues it. Read once at start-up, so a replaced file takes effect on restart; a relative
+     * path resolves against the working directory. Exactly one of this and {@link #apiKey}.
+     */
+    private String serviceAccountKeyFile;
 
     /** Default voice; null falls back to the provider implementation's own default. */
     private String voice;

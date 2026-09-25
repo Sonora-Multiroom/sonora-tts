@@ -14,6 +14,7 @@ import multiroom.tts.provider.ProviderRegistry;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.provider.cloud.GoogleCloudTtsProvider;
 import multiroom.tts.provider.cloud.OpenAiTtsProvider;
+import multiroom.tts.provider.cloud.google.ServiceAccountKey;
 import multiroom.tts.provider.local.LocalHttpTtsProvider;
 import multiroom.tts.provider.local.PiperTtsProvider;
 import multiroom.tts.service.PlaybackCompletionListener;
@@ -25,6 +26,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -57,10 +59,21 @@ public class TtsAutoConfiguration {
     private TtsProvider buildProvider(TtsProviderConfig config, TtsProperties properties) {
         return switch (config.getType()) {
             case OPENAI -> new OpenAiTtsProvider(config);
-            case GOOGLE_CLOUD -> new GoogleCloudTtsProvider(config, properties.getVoiceCatalogue());
+            case GOOGLE_CLOUD -> new GoogleCloudTtsProvider(config, properties.getVoiceCatalogue(),
+                    serviceAccountKey(config));
             case PIPER -> new PiperTtsProvider(config);
             case LOCAL_HTTP -> new LocalHttpTtsProvider(config);
         };
+    }
+
+    /**
+     * Reads the entry's key file here, once, rather than in validation: validating it there would
+     * read it twice or keep a private key in a configuration-properties bean. A local file read
+     * during construction is allowed; a fault still aborts start-up naming the entry.
+     */
+    private static ServiceAccountKey serviceAccountKey(TtsProviderConfig config) {
+        String file = config.getServiceAccountKeyFile();
+        return file == null || file.isBlank() ? null : ServiceAccountKey.load(config.getName(), Path.of(file));
     }
 
     @Bean

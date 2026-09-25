@@ -434,4 +434,88 @@ class TtsPropertiesValidationTest {
 
         propertiesWith(google).validate();
     }
+
+    // --- 003: exactly one google-cloud credential ---------------------------------------------
+
+    private static TtsProviderConfig googleWith(String apiKey, String keyFile) {
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.setApiKey(apiKey);
+        google.setServiceAccountKeyFile(keyFile);
+        return google;
+    }
+
+    @Test
+    void aGoogleEntryWithNeitherCredentialAbortsStartUp() {
+        assertThatThrownBy(() -> propertiesWith(googleWith(null, null)).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("multiroom-tts: provider 'google' requires exactly one of api-key and "
+                        + "service-account-key-file");
+    }
+
+    @Test
+    void aGoogleEntryWithBothCredentialsAbortsStartUp() {
+        assertThatThrownBy(() -> propertiesWith(googleWith("key", "/etc/sa.json")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("multiroom-tts: provider 'google' requires exactly one of api-key and "
+                        + "service-account-key-file, not both");
+    }
+
+    @Test
+    void aBlankApiKeyBesideAKeyFileCountsAsUnset() {
+        // Validation checks the shape only: the file is read when the provider is built.
+        propertiesWith(googleWith("  ", "/does/not/matter.json")).validate();
+    }
+
+    @Test
+    void aBlankKeyFileBesideNoApiKeyCountsAsUnset() {
+        assertThatThrownBy(() -> propertiesWith(googleWith(null, " ")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requires exactly one of api-key and service-account-key-file");
+    }
+
+    @Test
+    void aPre003GoogleEntryWithOnlyAnApiKeyStillStarts() {
+        propertiesWith(googleWith("key", null)).validate();
+    }
+
+    @Test
+    void openAiStillRequiresAnApiKey() {
+        TtsProviderConfig openai = new TtsProviderConfig();
+        openai.setName("openai");
+        openai.setType(ProviderType.OPENAI);
+
+        assertThatThrownBy(() -> propertiesWith(openai).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("multiroom-tts: provider 'openai' requires api-key");
+    }
+
+    @Test
+    void aKeyFileOnAnyOtherProviderTypeAbortsStartUp(@TempDir Path tempDir) throws Exception {
+        TtsProviderConfig openai = new TtsProviderConfig();
+        openai.setName("openai");
+        openai.setType(ProviderType.OPENAI);
+        openai.setApiKey("sk-test");
+
+        Path model = Files.createFile(tempDir.resolve("model.onnx"));
+        Files.createFile(tempDir.resolve("model.onnx.json"));
+        TtsProviderConfig piper = new TtsProviderConfig();
+        piper.setName("piper");
+        piper.setType(ProviderType.PIPER);
+        piper.setModelPath(model.toString());
+
+        TtsProviderConfig localHttp = new TtsProviderConfig();
+        localHttp.setName("local");
+        localHttp.setType(ProviderType.LOCAL_HTTP);
+        localHttp.setEndpoint("http://127.0.0.1:5002/api/tts");
+
+        for (TtsProviderConfig provider : List.of(openai, piper, localHttp)) {
+            provider.setServiceAccountKeyFile("/etc/sa.json");
+
+            assertThatThrownBy(() -> propertiesWith(provider).validate())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageStartingWith("multiroom-tts: provider '" + provider.getName() + "'")
+                    .hasMessageContaining("service-account-key-file")
+                    .hasMessageContaining(provider.getType().name());
+        }
+    }
 }
