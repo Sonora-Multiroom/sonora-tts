@@ -62,7 +62,7 @@ class OpenAiTtsProviderTest {
                 .willReturn(aResponse().withStatus(200).withBody(fakeWav())));
 
         SynthesisResult result = providerUnderTest(2)
-                .synthesize(new SynthesisRequest("hello", "alloy", "en-US", 48000, 2));
+                .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("alloy", "en-US", null), 48000, 2));
 
         assertThat(result.audioData()).isEqualTo(fakeWav());
     }
@@ -72,7 +72,7 @@ class OpenAiTtsProviderTest {
         server.stubFor(post(urlEqualTo("/v1/audio/speech")).willReturn(aResponse().withStatus(429)));
 
         assertThatThrownBy(() -> providerUnderTest(2)
-                .synthesize(new SynthesisRequest("hello", "alloy", "en-US", 48000, 2)))
+                .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("alloy", "en-US", null), 48000, 2)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.PROVIDER_RATE_LIMITED);
@@ -84,9 +84,21 @@ class OpenAiTtsProviderTest {
                 .willReturn(aResponse().withStatus(200).withBody(fakeWav()).withFixedDelay(3000)));
 
         assertThatThrownBy(() -> providerUnderTest(1)
-                .synthesize(new SynthesisRequest("hello", "alloy", "en-US", 48000, 2)))
+                .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("alloy", "en-US", null), 48000, 2)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.PROVIDER_TIMEOUT);
+    }
+
+    @Test
+    void resolveSettingsKeeps001sRuleAndRejectsGoogleOnlyFields() {
+        OpenAiTtsProvider provider = providerUnderTest(2);
+
+        assertThat(provider.resolveSettings(new RequestedSettings("nova", "fr-FR", null, null, null)).voice())
+                .isEqualTo("nova");
+        assertThatThrownBy(() -> provider.resolveSettings(new RequestedSettings(null, null, null, null, 0.9)))
+                .isInstanceOf(TtsException.class)
+                .hasMessageContaining("Field 'speakingRate' is not supported")
+                .hasMessageContaining("OPENAI");
     }
 }

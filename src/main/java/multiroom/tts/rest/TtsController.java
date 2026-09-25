@@ -17,9 +17,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The external trigger FR-014 requires. {@code /api/tts/**} is this module's own namespace —
+ * The external trigger for announcements. {@code /api/tts/**} is this module's own namespace —
  * {@code /api/v2/**} is {@code multiroom-rest}'s published contract and must not be touched here.
- * Adds no authentication of its own; the shared HTTP surface governs access (FR-026).
+ * Adds no authentication of its own; the shared HTTP surface governs access.
  */
 @RestController
 @RequestMapping("/api/tts")
@@ -44,7 +44,8 @@ public class TtsController {
     public ResponseEntity<SpeakAcceptedResponse> speak(@Valid @RequestBody SpeakRequest request) {
         AnnounceResult result = ttsService.speak(new AnnounceCommand(
                 request.text(), request.targetName(), request.targetType(),
-                request.providerName(), request.voice(), request.language()));
+                request.providerName(), request.voice(), request.language(),
+                request.engine(), request.pitch(), request.speakingRate()));
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(new SpeakAcceptedResponse(result.announcementId(), result.cacheHit(), result.queueDepth()));
     }

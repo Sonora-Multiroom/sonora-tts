@@ -3,8 +3,11 @@ package multiroom.tts.provider.local;
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
 import multiroom.tts.config.TtsProviderConfig;
+import multiroom.tts.provider.DefaultSettingsResolution;
+import multiroom.tts.provider.RequestedSettings;
 import multiroom.tts.provider.SynthesisRequest;
 import multiroom.tts.provider.SynthesisResult;
+import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 
 import java.io.IOException;
@@ -20,7 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * There is no standalone binary or console script for this package — only a {@code python3 -m
  * piper} module — so {@link TtsProviderConfig#getPythonExecutable()} names the interpreter, not
  * Piper itself. The interpreter is resolved (via {@code PATH} or as an absolute path) only when
- * this method runs, never during construction (019 FR-019).
+ * this method runs, never during construction.
  *
  * <p>With neither {@code --output-file} nor {@code --output-raw} given, this CLI writes a
  * complete WAV to stdout and reads the text to speak from stdin — the same shape every other
@@ -28,16 +31,23 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class PiperTtsProvider implements TtsProvider {
 
+    private final TtsProviderConfig config;
     private final String pythonExecutable;
     private final String modelPath;
     private final String configPath;
     private final Duration timeout;
 
     public PiperTtsProvider(TtsProviderConfig config) {
+        this.config = config;
         this.pythonExecutable = config.getPythonExecutable();
         this.modelPath = config.getModelPath();
         this.configPath = modelPath + ".json";
         this.timeout = Duration.ofSeconds(config.getTimeoutSeconds());
+    }
+
+    @Override
+    public SynthesisSettings resolveSettings(RequestedSettings requested) {
+        return DefaultSettingsResolution.resolve(config, requested);
     }
 
     @Override

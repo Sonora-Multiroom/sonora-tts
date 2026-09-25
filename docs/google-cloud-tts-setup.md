@@ -42,7 +42,10 @@ offers **OAuth client ID** and **Service account**, no plain API key option.
 1. ☰ (hamburger menu, top-left) → **APIs & Services** → **Credentials**
 2. **+ Create credentials** → **API key**
 3. When prompted for "APIs that can be accessed using this key", restrict it to **Cloud
-   Text-to-Speech API**
+   Text-to-Speech API**. Do **not** select **Agent Platform API** in the same key: selecting it
+   turns the key into one bound to a service account and disables every other API in the list.
+   The Text-to-Speech endpoint then rejects the key (`401` *"API keys are not supported by this
+   API"*). Agent Platform matters only for Gemini voices (see [Voices](#voices)).
 4. Copy the generated key
 
 ## 5. Use it in config
@@ -56,14 +59,16 @@ multiroom:
         api-key: ${GOOGLE_TTS_API_KEY}
         voice: en-US-Neural2-C
         language: en-US
-        engine: neural2    # not sent to Google — see note below
+        engine: neural2    # optional here: the default engine for short voice names
 ```
 
-`engine` is **not an API parameter for this provider**: `GoogleCloudTtsProvider` never reads it.
-It's a free-text label folded only into the cache key, useful for keeping cache entries distinct
-if you configure multiple `GOOGLE_CLOUD` entries; any string works, there's no fixed set of values.
-The actual voice family (Neural2/WaveNet/Chirp3-HD/etc.) is entirely determined by `voice`. Contrast
-`OPENAI`, where `engine` *is* the literal `model` field sent to the API (default `tts-1`).
+`engine` is the entry's **default engine for short voice names** (`c` becomes
+`en-US-Neural2-C`). It must be one of `standard`, `wavenet`, `neural2`, `studio`, `chirp-hd` or
+`chirp3-hd`, and an unrecognized value aborts start-up. It may be left out when `voice` is a full
+name, as above: the engine is then taken from the voice. Before 0.1.1 it was a free-text cache
+label, so an entry with any other label now needs it removed or corrected. See
+[configuration.md](configuration.md#google-cloud) for the other accepted shapes, `pitch` and
+`speaking-rate`.
 
 ## A service account JSON is not what you need here
 
@@ -76,18 +81,23 @@ configuration. Delete or ignore that JSON and create a plain API key via step 4 
 
 ## Voices
 
-The pricing page groups voices into three categories; **all three that use `voice.name` work
-with this extension today** — only the third does not:
+The pricing page groups voices into three categories. **The first two work with this extension
+today. The third does not:**
 
 - **Legacy TTS models**: `WaveNet`, `Studio`, `Standard`, `Neural2`.
 - **Latest TTS models**: `Chirp3-HD` — "powered by our cutting-edge LLMs", Google's own
   highest-quality, most natural-sounding option; its own free tier (first 1 million
   characters/month, same allowance as WaveNet — see [above](#2-enable-billing)).
-- **Gemini-TTS models** (e.g. `gemini-3.1-flash-tts-preview`, token-priced, **no free tier**) — a
-  separate native-audio-generation feature, not the classic `v1/text:synthesize` endpoint.
-  `GoogleCloudTtsProvider` doesn't call it; using one would need a different provider
-  implementation, not just a config change — see
-  [../future/google-cloud-gemini-tts-params.md](../future/google-cloud-gemini-tts-params.md).
+- **Gemini-TTS models** (for example `gemini-2.5-flash-tts` or `gemini-3.1-flash-tts-preview`,
+  token-priced, **no free tier**). Google accepts them on the same `v1/text:synthesize` endpoint
+  (`voice.modelName`), but **not with an API key**: tested on 2026-09-24, a plain key gets
+  `403 IAM_PERMISSION_DENIED` (`aiplatform.endpoints.predict`) and a key bound to a service
+  account gets `401`. Only OAuth works there. They can be reached with a bound API key through
+  Agent Platform's own `generateContent` endpoint instead. That needs the Agent Platform API
+  enabled, a service account with the **Agent Platform User** role, and a different
+  request and response format. `GoogleCloudTtsProvider` doesn't call either endpoint, and support
+  is planned as a separate provider (feature `003`). See
+  [future/google-cloud-gemini-tts-params.md](future/google-cloud-gemini-tts-params.md).
 
 Within Legacy + Latest (what this extension can actually use): `Chirp3-HD` and `Neural2` sound
 most natural; `Standard`/`WaveNet` are cheaper; `Studio` is the most expensive.
@@ -110,6 +120,23 @@ by filtering on the family prefix for your language, e.g. `uk-UA-Chirp3-HD-*` or
 
 Full voice list: [cloud.google.com/text-to-speech/docs/voices](https://cloud.google.com/text-to-speech/docs/voices) —
 filter by name prefix (`en-US-Chirp3-HD-*`, `en-US-Neural2-*`, etc.), not by the Gemini model names.
+Or ask the extension, which lists exactly the voices an entry accepts:
+
+```http
+GET /api/tts/providers/google/voices?language=uk-UA&engine=chirp3-hd
+```
+
+Each result gives the `shortName` to use with an engine and a language, and the `fullName` to use
+on its own.
+
+**The language comes from the voice.** Google rejects a request whose `languageCode` differs from
+the voice's own language, so the extension takes the language from a full voice name:
+`uk-UA-Chirp3-HD-Charon` is sent as `uk-UA` without any `language` setting. A request `language`
+that contradicts the voice is a `400 INVALID_REQUEST` before anything is sent. A short name such as
+`charon` is completed with the request's language, or else the entry's default language (its
+`language` setting, or else the language of its configured full voice). When Google does reject a
+request, its own explanation follows the status, e.g.
+`Provider 'google' returned HTTP 400: Requested language code 'en-US' doesn't match …`.
 
 ## See also
 

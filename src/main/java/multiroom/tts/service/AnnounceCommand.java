@@ -7,5 +7,6 @@ import multiroom.api.model.TargetType;
  * into this so the service package does not depend on {@code rest}.
  */
 public record AnnounceCommand(String text, String targetName, TargetType targetType, String providerName,
-                               String voice, String language) {
+                               String voice, String language, String engine, Double pitch,
+                               Double speakingRate) {
 }

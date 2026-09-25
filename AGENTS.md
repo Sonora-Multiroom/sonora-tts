@@ -85,6 +85,11 @@ These come from `019-extension-shared-classloader` and are the terms on which th
 
 **Lookup order**: `specs/` → `.specify/memory/`. Never assume behaviour — read the spec.
 
+**Do not cite spec IDs in code.** `FR-`, `SC-`, user-story (`US`) and research (`R`) numbers are
+local to one feature's `spec.md` / `research.md`, so every feature reuses them (002's `SC-004` is
+not 001's). State the rule or the reason itself in the comment. A feature number (`001`, `019`) or a
+constitution principle is unambiguous and may be named.
+
 ## Known Issues & Gotchas
 
 ### ⚠️ `extension.id` Is Not Derived From The Artifact Id

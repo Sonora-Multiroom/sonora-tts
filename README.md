@@ -17,7 +17,10 @@ contributes into the host's Spring context by auto-configuration, and obtains co
 ordinary dependency injection. It runs no web server of its own and ships no copy of Spring.
 
 - Multiple named providers (cloud or local), one of them the default; a request may override the
-  provider, voice and language
+  provider, voice and language, and for Google Cloud also the engine, pitch and speaking rate
+- Google Cloud voices by full name (`uk-UA-Chirp3-HD-Charon`) or by engine + language + short
+  name (`charon`), checked against Google's published voice list, which
+  `GET /api/tts/providers/{name}/voices` also exposes
 - Disk cache keyed by text + provider/model + voice/language + audio format, surviving restarts,
   LRU-evicted at a configurable size
 - Playback through an ephemeral registered input; the target's prior state is restored when the
@@ -77,4 +80,5 @@ examples for every provider type, and how to trigger an announcement and manage 
 | [AGENTS.md](AGENTS.md) | How to work in this repository, and the rules across the repo boundary |
 | [.specify/memory/constitution.md](.specify/memory/constitution.md) | Engineering principles, the merge gate, the extension boundary |
 | [specs/001-tts-extension/](specs/001-tts-extension/) | The feature: spec, plan, tasks, contracts |
+| [specs/002-google-voice-selection/](specs/002-google-voice-selection/) | Google Cloud voice selection; its REST contract (v0.1.1) supersedes 001's |
 | [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |

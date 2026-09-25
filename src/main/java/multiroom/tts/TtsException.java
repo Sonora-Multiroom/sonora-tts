@@ -3,7 +3,7 @@ package multiroom.tts;
 /**
  * The one exception type services and providers throw. Nothing below the {@code rest} package
  * knows about HTTP status codes — {@code TtsExceptionHandler} holds the single
- * {@link TtsErrorCode} to status mapping (FR-032).
+ * {@link TtsErrorCode} to status mapping.
  */
 public class TtsException extends RuntimeException {
 

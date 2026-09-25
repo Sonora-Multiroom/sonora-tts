@@ -13,7 +13,7 @@ import java.util.function.BiConsumer;
 
 /**
  * Serializes announcements per target: a {@link LinkedBlockingQueue} per target key, with one
- * daemon worker thread spawned on demand and self-terminating once its queue drains (FR-009).
+ * daemon worker thread spawned on demand and self-terminating once its queue drains.
  *
  * <p>Only the routing step is serialized. {@code activator} performs {@code registerInput} +
  * {@code createRoute} for a dequeued task and must call the given {@code Runnable} exactly once

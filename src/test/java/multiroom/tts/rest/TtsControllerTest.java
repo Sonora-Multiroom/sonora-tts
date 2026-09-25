@@ -6,6 +6,7 @@ import multiroom.tts.service.AnnounceCommand;
 import multiroom.tts.service.AnnounceResult;
 import multiroom.tts.service.TtsService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -14,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -162,6 +164,45 @@ class TtsControllerTest {
                 .andExpect(status().isAccepted());
 
         verify(ttsService).speak(eq(new AnnounceCommand("Hi", "kitchen",
-                multiroom.api.model.TargetType.SINGLE_OUTPUT, "piper-local", "en_US-ryan-medium", "en-US")));
+                multiroom.api.model.TargetType.SINGLE_OUTPUT, "piper-local", "en_US-ryan-medium", "en-US",
+                null, null, null)));
+    }
+
+    @Test
+    void enginePitchAndSpeakingRateReachTheCommandUnswapped() throws Exception {
+        when(ttsService.speak(any())).thenReturn(new AnnounceResult(UUID.randomUUID(), false, 1));
+
+        mockMvc.perform(post("/api/tts/speak")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"text":"Hi","targetName":"kitchen","targetType":"SINGLE_OUTPUT",
+                                 "providerName":"google","voice":"c","language":"en-US",
+                                 "engine":"neural2","pitch":-2.0,"speakingRate":0.9}
+                                """))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<AnnounceCommand> captor = ArgumentCaptor.forClass(AnnounceCommand.class);
+        verify(ttsService).speak(captor.capture());
+        assertThat(captor.getValue().engine()).isEqualTo("neural2");
+        assertThat(captor.getValue().pitch()).isEqualTo(-2.0);
+        assertThat(captor.getValue().speakingRate()).isEqualTo(0.9);
+    }
+
+    @Test
+    void omittedEnginePitchAndSpeakingRateAreNull() throws Exception {
+        when(ttsService.speak(any())).thenReturn(new AnnounceResult(UUID.randomUUID(), false, 1));
+
+        mockMvc.perform(post("/api/tts/speak")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"text":"Hi","targetName":"kitchen","targetType":"SINGLE_OUTPUT"}
+                                """))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<AnnounceCommand> captor = ArgumentCaptor.forClass(AnnounceCommand.class);
+        verify(ttsService).speak(captor.capture());
+        assertThat(captor.getValue().engine()).isNull();
+        assertThat(captor.getValue().pitch()).isNull();
+        assertThat(captor.getValue().speakingRate()).isNull();
     }
 }

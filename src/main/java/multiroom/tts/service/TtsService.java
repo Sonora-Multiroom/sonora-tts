@@ -19,10 +19,11 @@ import multiroom.tts.cache.AudioCache;
 import multiroom.tts.cache.CacheKey;
 import multiroom.tts.cache.CacheWriteException;
 import multiroom.tts.config.TtsProperties;
-import multiroom.tts.config.TtsProviderConfig;
 import multiroom.tts.provider.ProviderRegistry;
+import multiroom.tts.provider.RequestedSettings;
 import multiroom.tts.provider.SynthesisRequest;
 import multiroom.tts.provider.SynthesisResult;
+import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.queue.AnnouncementQueueManager;
 import multiroom.tts.queue.AnnouncementTask;
@@ -35,10 +36,8 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * Orchestrates one announcement end to end: validate, resolve the target and provider, serve from
@@ -53,7 +52,7 @@ import java.util.stream.Collectors;
  * <p>This class's own work ends at {@code queueManager.enqueue}: it does not block for playback,
  * does not restore routes and does not unregister the ephemeral input — {@link
  * PlaybackCompletionListener} owns all three, because completion is only observable as {@code
- * RouteDestroyedEvent} (FR-008).
+ * RouteDestroyedEvent}.
  */
 public class TtsService implements SmartLifecycle {
 
@@ -62,7 +61,6 @@ public class TtsService implements SmartLifecycle {
 
     private final TtsProperties properties;
     private final ProviderRegistry providerRegistry;
-    private final Map<String, TtsProviderConfig> providerConfigsByName;
     private final AudioConverter audioConverter;
     private final AudioCache audioCache;
     private final TtsInputResolver inputResolver;
@@ -78,8 +76,6 @@ public class TtsService implements SmartLifecycle {
                        RouteService routeService, PlaybackCompletionListener completionListener) {
         this.properties = properties;
         this.providerRegistry = providerRegistry;
-        this.providerConfigsByName = properties.getProviders().stream()
-                .collect(Collectors.toMap(TtsProviderConfig::getName, config -> config));
         this.audioConverter = audioConverter;
         this.audioCache = audioCache;
         this.inputResolver = inputResolver;
@@ -100,13 +96,15 @@ public class TtsService implements SmartLifecycle {
         TtsProvider provider = command.providerName() != null
                 ? providerRegistry.resolve(command.providerName())
                 : providerRegistry.resolveDefault();
-        TtsProviderConfig providerConfig = providerConfigsByName.get(providerName);
 
-        String voice = command.voice() != null ? command.voice() : providerConfig.getVoice();
-        String language = command.language() != null ? command.language() : providerConfig.getLanguage();
-        String engine = providerConfig.getEngine();
-
-        CacheKey cacheKey = new CacheKey(command.text(), providerName, engine, voice, language, NATIVE_FORMAT);
+        // Resolution is pure and runs before the cache lookup, so the key is built from the
+        // resolved settings however the caller spelled them, and a hit costs no network work.
+        // The *Key forms are the provider's decision; they are copied, never
+        // interpreted, so this path knows no provider's defaults (Principle IV).
+        SynthesisSettings settings = provider.resolveSettings(new RequestedSettings(
+                command.voice(), command.language(), command.engine(), command.pitch(), command.speakingRate()));
+        CacheKey cacheKey = new CacheKey(command.text(), providerName, settings.engine(), settings.voiceKey(),
+                settings.language(), settings.pitchKey(), settings.speakingRateKey(), NATIVE_FORMAT);
 
         boolean cacheHit;
         boolean temporaryFile = false;
@@ -121,7 +119,7 @@ public class TtsService implements SmartLifecycle {
             cacheHit = false;
             log.debug("TTS_CACHE_MISS text.length={} provider={}", command.text().length(), providerName);
             SynthesisResult synthesisResult = synthesize(provider, providerName,
-                    new SynthesisRequest(command.text(), voice, language,
+                    new SynthesisRequest(command.text(), settings,
                             NATIVE_FORMAT.sampleRate(), NATIVE_FORMAT.channels()));
             byte[] pcm = audioConverter.convert(synthesisResult.audioData(), NATIVE_FORMAT);
             try {

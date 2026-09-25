@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * A disk-backed LRU cache: {@code index.json} plus SHA-256-keyed {@code .wav} files, wrapped by a
  * plain JDK access-ordered {@link LinkedHashMap} — no third-party cache library. The index and
- * files survive restarts (FR-017, FR-018); pinned entries are skipped by eviction, never deleted
+ * files survive restarts; pinned entries are skipped by eviction, never deleted
  * out from under a queued announcement.
  *
  * <p>That guarantee covers operator-initiated removal too, not just eviction: {@link #invalidate},

@@ -19,8 +19,8 @@ import java.nio.ByteBuffer;
  * system's native format through the injected {@link FormatConverter}.
  *
  * <p>Writes no conversion maths of its own: resampling, channel mixing and bit-depth changes
- * belong to the one shared converter (FR-031, constitution I). The converter's returned buffer is
- * borrowed, so its contents are copied before this method returns.
+ * belong to the one shared converter, and no extension may implement its own (constitution I).
+ * The converter's returned buffer is borrowed, so its contents are copied before this method returns.
  */
 public class AudioConverter {
 
