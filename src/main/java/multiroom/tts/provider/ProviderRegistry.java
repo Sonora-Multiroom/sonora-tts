@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * Named lookup of the configured {@link TtsProvider} instances. The first entry is the implicit
- * default when no explicit {@code defaultProvider} is configured (FR-005).
+ * default when no explicit {@code defaultProvider} is configured.
  */
 public class ProviderRegistry {
 

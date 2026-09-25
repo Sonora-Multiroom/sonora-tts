@@ -13,16 +13,17 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * The single {@link TtsErrorCode} to HTTP status mapping (FR-032). Scoped to this module's own
+ * The single {@link TtsErrorCode} to HTTP status mapping. Scoped to this module's own
  * controllers: under 019's shared {@code DispatcherServlet}, an unscoped {@code
  * @RestControllerAdvice} here would otherwise convert another module's exceptions into this
  * module's error shape.
  */
-@RestControllerAdvice(assignableTypes = {TtsController.class, TtsCacheController.class})
+@RestControllerAdvice(assignableTypes = {TtsController.class, TtsCacheController.class, TtsVoiceController.class})
 public class TtsExceptionHandler {
 
     private static final Set<TtsErrorCode> CALLER_FIXABLE = EnumSet.of(
-            TtsErrorCode.INVALID_REQUEST, TtsErrorCode.TARGET_NOT_FOUND, TtsErrorCode.PROVIDER_NOT_FOUND);
+            TtsErrorCode.INVALID_REQUEST, TtsErrorCode.TARGET_NOT_FOUND, TtsErrorCode.PROVIDER_NOT_FOUND,
+            TtsErrorCode.INVALID_VOICE);
 
     @ExceptionHandler(TtsException.class)
     public ResponseEntity<ErrorResponse> handleTtsException(TtsException e) {

@@ -30,16 +30,42 @@ public class TtsProviderConfig {
     /** Default voice; null falls back to the provider implementation's own default. */
     private String voice;
 
-    /** Default BCP 47 language tag. */
-    private String language = "en-US";
+    /**
+     * Default BCP 47 language tag. Deliberately has no field default: {@code google-cloud} must
+     * not have an implicit {@code en-US} that overrides a voice's own language. The other
+     * provider types still fall back to {@code en-US}, in {@code DefaultSettingsResolution}.
+     * For {@code google-cloud} it is the default language for short voice names.
+     */
+    private String language;
 
-    /** Model/engine name (e.g. {@code tts-1}, {@code neural2}); part of the cache key. */
+    /**
+     * Model/engine name. For OpenAI it is the model (e.g. {@code tts-1}) and part of the cache
+     * key. For {@code google-cloud} it is the <strong>default engine for short voice names</strong>
+     * ({@code standard}, {@code wavenet}, {@code neural2}, {@code studio}, {@code chirp-hd},
+     * {@code chirp3-hd}), validated at start-up — not a free-text label.
+     */
     private String engine;
 
     /** Synthesis call timeout. Values above 10s are accepted but warned about at start-up. */
     private int timeoutSeconds = 10;
 
-    /** Provider-specific parameters (e.g. {@code speaking_rate}, {@code pitch}). */
+    /**
+     * {@code google-cloud} only: pitch in semitones, [-20.0, 20.0]. Sent only when set; any other
+     * provider type aborts start-up if it is set, rather than accepting and ignoring it.
+     */
+    private Double pitch;
+
+    /**
+     * {@code google-cloud} only: speaking rate, [0.25, 2.0], where 1.0 is the voice's natural
+     * speed. Sent only when set; any other provider type aborts start-up if it is set.
+     */
+    private Double speakingRate;
+
+    /**
+     * Provider-specific parameters. Must be empty for {@code google-cloud}, whose audio settings
+     * are the typed {@link #pitch} and {@link #speakingRate}: a non-empty map there
+     * aborts start-up rather than being accepted and ignored.
+     */
     private Map<String, String> extraParams = new LinkedHashMap<>();
 
     /**

@@ -4,8 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
 import multiroom.tts.config.TtsProviderConfig;
+import multiroom.tts.provider.DefaultSettingsResolution;
+import multiroom.tts.provider.RequestedSettings;
 import multiroom.tts.provider.SynthesisRequest;
 import multiroom.tts.provider.SynthesisResult;
+import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 
 import java.io.IOException;
@@ -20,7 +23,7 @@ import java.util.Map;
 
 /**
  * {@code POST /v1/audio/speech}. Built at construction time; contacts nothing until
- * {@link #synthesize} is called (019 FR-019).
+ * {@link #synthesize} is called.
  */
 public class OpenAiTtsProvider implements TtsProvider {
 
@@ -28,6 +31,7 @@ public class OpenAiTtsProvider implements TtsProvider {
     private static final URI DEFAULT_ENDPOINT = URI.create("https://api.openai.com/v1/audio/speech");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private final TtsProviderConfig config;
     private final HttpClient httpClient;
     private final URI endpoint;
     private final String apiKey;
@@ -40,11 +44,17 @@ public class OpenAiTtsProvider implements TtsProvider {
 
     /** Visible so tests can point this provider at a WireMock server instead of the real API. */
     public OpenAiTtsProvider(TtsProviderConfig config, URI endpoint) {
+        this.config = config;
         this.timeout = Duration.ofSeconds(config.getTimeoutSeconds());
         this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
         this.endpoint = endpoint;
         this.apiKey = config.getApiKey();
         this.model = config.getEngine() != null ? config.getEngine() : DEFAULT_MODEL;
+    }
+
+    @Override
+    public SynthesisSettings resolveSettings(RequestedSettings requested) {
+        return DefaultSettingsResolution.resolve(config, requested);
     }
 
     @Override

@@ -32,8 +32,9 @@ class TtsExceptionHandlerTest {
 
     private static int expectedStatus(TtsErrorCode code) {
         return switch (code) {
-            case INVALID_REQUEST, TARGET_NOT_FOUND, PROVIDER_NOT_FOUND -> 400;
-            case PROVIDER_TIMEOUT, PROVIDER_RATE_LIMITED, PROVIDER_ERROR, FORMAT_NORMALIZATION_FAILED -> 503;
+            case INVALID_REQUEST, TARGET_NOT_FOUND, PROVIDER_NOT_FOUND, INVALID_VOICE -> 400;
+            case PROVIDER_TIMEOUT, PROVIDER_RATE_LIMITED, PROVIDER_ERROR, FORMAT_NORMALIZATION_FAILED,
+                    VOICE_CATALOGUE_UNAVAILABLE -> 503;
         };
     }
 

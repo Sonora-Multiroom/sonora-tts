@@ -105,7 +105,7 @@ class TtsPropertiesValidationTest {
     void doesNotValidatePythonExecutableAsAFilesystemPath(@TempDir Path tempDir) throws Exception {
         // pythonExecutable defaults to "python3", a bare PATH-resolved command name, not a
         // literal path — validation must not reject it for "not existing" at cwd, and must
-        // never spawn a process to check it either (FR-029).
+        // never spawn a process to check it either.
         Path model = tempDir.resolve("model.onnx");
         Path modelConfig = tempDir.resolve("model.onnx.json");
         Files.createFile(model);
@@ -127,7 +127,7 @@ class TtsPropertiesValidationTest {
     void doesNotContactAnyNetworkOrProcessDuringValidation() {
         // An API key that is present but wrong, or an endpoint that is present but
         // unreachable, must never be detected here — validation touches configuration
-        // and the filesystem only (FR-029).
+        // and the filesystem only.
         TtsProviderConfig localHttp = new TtsProviderConfig();
         localHttp.setName("local");
         localHttp.setType(ProviderType.LOCAL_HTTP);
@@ -190,5 +190,248 @@ class TtsPropertiesValidationTest {
         properties.validate();
 
         assertThat(properties.getProviders()).isEmpty();
+    }
+
+    // --- 002: google-cloud entries -----------------------------------------------------------
+
+    private static TtsProviderConfig google(String engine, String language, String voice) {
+        TtsProviderConfig google = new TtsProviderConfig();
+        google.setName("google");
+        google.setType(ProviderType.GOOGLE_CLOUD);
+        google.setApiKey("key");
+        google.setEngine(engine);
+        google.setLanguage(language);
+        google.setVoice(voice);
+        return google;
+    }
+
+    private static TtsProperties propertiesWith(TtsProviderConfig... providers) {
+        TtsProperties properties = new TtsProperties();
+        properties.setProviders(List.of(providers));
+        return properties;
+    }
+
+    @Test
+    void theExactProductionGoogleEntryStartsWithNoNetworkCall() {
+        // Production's entry, verbatim: it must start with no edits. There is no
+        // network to reach here: validation is a pure configuration check.
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.setTimeoutSeconds(10);
+
+        propertiesWith(google).validate();
+    }
+
+    @Test
+    void aMalformedGoogleLanguageAbortsStartUpNamingEntryAndValue() {
+        assertThatThrownBy(() -> propertiesWith(google(null, "english", "en-US-Neural2-C")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("'english'");
+    }
+
+    @Test
+    void aMalformedGoogleVoiceAbortsStartUpNamingEntryAndValue() {
+        assertThatThrownBy(() -> propertiesWith(google(null, "uk-UA", "uk-UA-Charon")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("'uk-UA-Charon'");
+    }
+
+    @Test
+    void aLanguageContradictingAFullVoiceOnlyWarns() {
+        propertiesWith(google(null, "en-US", "uk-UA-Chirp3-HD-Charon")).validate();
+    }
+
+    @Test
+    void aLocalHttpEntryWithNoLanguageStillStarts() {
+        TtsProviderConfig localHttp = new TtsProviderConfig();
+        localHttp.setName("piper-local");
+        localHttp.setType(ProviderType.LOCAL_HTTP);
+        localHttp.setEndpoint("http://127.0.0.1:5002/api/tts");
+
+        propertiesWith(localHttp).validate();
+
+        assertThat(localHttp.getLanguage()).isNull();
+    }
+
+    @Test
+    void us2_6_aShortVoiceWithNoEngineAbortsStartUp() {
+        assertThatThrownBy(() -> propertiesWith(google(null, "uk-UA", "charon")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("an engine is required");
+    }
+
+    @Test
+    void anEntryWithNeitherVoiceNorEngineAbortsStartUp() {
+        assertThatThrownBy(() -> propertiesWith(google(null, "en-US", null)).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("an engine is required");
+    }
+
+    @Test
+    void anUnrecognizedEngineAbortsStartUpListingTheSupportedOnes() {
+        assertThatThrownBy(() -> propertiesWith(google("chirp4", "en-US", null)).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("'chirp4'")
+                .hasMessageContaining("Standard, Wavenet, Neural2, Studio, Chirp-HD, Chirp3-HD");
+    }
+
+    @Test
+    void aShortVoiceWithNoLanguageAbortsStartUp() {
+        assertThatThrownBy(() -> propertiesWith(google("chirp3-hd", null, "charon")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("a language is required for short voice 'charon'");
+    }
+
+    @Test
+    void us2_5_theProductionShapeWithNoEngineStarts() {
+        propertiesWith(google(null, "en-US", "en-US-Neural2-C")).validate();
+    }
+
+    @Test
+    void aFullVoiceAloneStarts() {
+        propertiesWith(google(null, null, "uk-UA-Chirp3-HD-Charon")).validate();
+    }
+
+    @Test
+    void anEngineAndLanguageWithNoVoiceStart() {
+        propertiesWith(google("WaveNet", "en-US", null)).validate();
+    }
+
+    @Test
+    void theStructuredShapeStarts() {
+        propertiesWith(google("chirp3-hd", "uk-UA", "charon")).validate();
+    }
+
+    @Test
+    void nonPositiveCatalogueTimingsAbortStartUp() {
+        for (String field : List.of("ttl", "failure-backoff", "fetch-timeout")) {
+            for (java.time.Duration value : List.of(java.time.Duration.ZERO, java.time.Duration.ofSeconds(-1))) {
+                TtsProperties properties = propertiesWith(google(null, "en-US", "en-US-Neural2-C"));
+                VoiceCatalogueProperties catalogue = properties.getVoiceCatalogue();
+                switch (field) {
+                    case "ttl" -> catalogue.setTtl(value);
+                    case "failure-backoff" -> catalogue.setFailureBackoff(value);
+                    default -> catalogue.setFetchTimeout(value);
+                }
+
+                assertThatThrownBy(properties::validate)
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageStartingWith("multiroom-tts: ")
+                        .hasMessageContaining("voice-catalogue." + field);
+            }
+        }
+    }
+
+    @Test
+    void theCatalogueDefaultsArePositive() {
+        VoiceCatalogueProperties catalogue = new VoiceCatalogueProperties();
+
+        assertThat(catalogue.getTtl()).isEqualTo(java.time.Duration.ofHours(24));
+        assertThat(catalogue.getFailureBackoff()).isEqualTo(java.time.Duration.ofSeconds(60));
+        assertThat(catalogue.getFetchTimeout()).isEqualTo(java.time.Duration.ofSeconds(3));
+    }
+
+    @Test
+    void aGoogleSpeakingRateOutOfRangeAbortsStartUpStatingTheRange() {
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.setSpeakingRate(2.5);
+
+        assertThatThrownBy(() -> propertiesWith(google).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("2.5")
+                .hasMessageContaining("[0.25, 2.0]");
+    }
+
+    @Test
+    void aGooglePitchOutOfRangeAbortsStartUpStatingTheRange() {
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.setPitch(25.0);
+
+        assertThatThrownBy(() -> propertiesWith(google).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("25.0")
+                .hasMessageContaining("[-20.0, 20.0]");
+    }
+
+    @Test
+    void aNaNGooglePitchAbortsStartUpStatingTheRange() {
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.setPitch(Double.NaN);
+
+        assertThatThrownBy(() -> propertiesWith(google).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("pitch NaN")
+                .hasMessageContaining("[-20.0, 20.0]");
+    }
+
+    @Test
+    void aNaNGoogleSpeakingRateAbortsStartUpStatingTheRange() {
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.setSpeakingRate(Double.NaN);
+
+        assertThatThrownBy(() -> propertiesWith(google).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("speaking-rate NaN")
+                .hasMessageContaining("[0.25, 2.0]");
+    }
+
+    @Test
+    void googleExtraParamsAbortStartUpPointingAtTheTypedSettings() {
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.getExtraParams().put("speaking_rate", "1.1");
+
+        assertThatThrownBy(() -> propertiesWith(google).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining("speaking_rate")
+                .hasMessageContaining("pitch")
+                .hasMessageContaining("speaking-rate");
+    }
+
+    @Test
+    void sc008_pitchOnAnotherProviderTypeAbortsStartUp() {
+        TtsProviderConfig openai = new TtsProviderConfig();
+        openai.setName("openai");
+        openai.setType(ProviderType.OPENAI);
+        openai.setApiKey("sk-test");
+        openai.setPitch(1.0);
+
+        assertThatThrownBy(() -> propertiesWith(openai).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'openai'")
+                .hasMessageContaining("pitch")
+                .hasMessageContaining("OPENAI");
+    }
+
+    @Test
+    void sc008_speakingRateOnAnotherProviderTypeAbortsStartUp() {
+        TtsProviderConfig localHttp = new TtsProviderConfig();
+        localHttp.setName("piper-local");
+        localHttp.setType(ProviderType.LOCAL_HTTP);
+        localHttp.setEndpoint("http://127.0.0.1:5002/api/tts");
+        localHttp.setSpeakingRate(1.1);
+
+        assertThatThrownBy(() -> propertiesWith(localHttp).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("speaking-rate")
+                .hasMessageContaining("LOCAL_HTTP");
+    }
+
+    @Test
+    void inRangeGooglePitchAndRateStart() {
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.setSpeakingRate(1.1);
+        google.setPitch(-2.0);
+
+        propertiesWith(google).validate();
     }
 }

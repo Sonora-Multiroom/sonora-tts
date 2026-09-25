@@ -22,8 +22,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The piece that makes FR-008 possible. Nothing in this module can observe playback directly —
- * {@code AudioInput.onComplete} lives in {@code multiroom.core.io}, out of reach. The route
+ * The piece that lets a target return to its prior state once an announcement ends. Nothing in
+ * this module can observe playback directly — {@code AudioInput.onComplete} lives in {@code multiroom.core.io}, out of reach. The route
  * lifecycle is the public signal: on EOF the pipeline drains and core publishes
  * {@link RouteDestroyedEvent}. Matching {@code event.route().getInputId()} against a tracked
  * announcement identifies it exactly, with no polling and no duration arithmetic.

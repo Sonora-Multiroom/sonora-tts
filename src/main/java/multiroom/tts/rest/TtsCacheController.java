@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** {@code DELETE /api/tts/cache[?providerName=]} and {@code GET /api/tts/cache/stats} (FR-019). */
+/** {@code DELETE /api/tts/cache[?providerName=]} and {@code GET /api/tts/cache/stats}. */
 @RestController
 @RequestMapping("/api/tts/cache")
 public class TtsCacheController {

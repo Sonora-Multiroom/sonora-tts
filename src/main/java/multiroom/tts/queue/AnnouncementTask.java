@@ -15,7 +15,7 @@ import java.util.UUID;
  * happened in the request thread; only {@code registerInput} + {@code createRoute} are deferred.
  *
  * @param cacheKey      {@code null} when {@code audioFile} is a spillover temp file rather than a
- *                       pinned cache entry (FR-025)
+ *                       pinned cache entry
  */
 public record AnnouncementTask(UUID announcementId, InputId inputId, TargetType targetType, String targetName,
                                 Path audioFile, boolean temporaryFile, List<Route> routeSnapshot,

@@ -18,6 +18,7 @@ import multiroom.tts.provider.local.LocalHttpTtsProvider;
 import multiroom.tts.provider.local.PiperTtsProvider;
 import multiroom.tts.service.PlaybackCompletionListener;
 import multiroom.tts.service.TtsService;
+import multiroom.tts.service.VoiceQueryService;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -33,8 +34,8 @@ import java.util.Map;
  * There is no {@code Extension} interface to implement and no {@code Extension-Class} manifest
  * attribute; 019 deleted both.
  *
- * <p>{@code matchIfMissing = true} so an upgrade never silently disables a working extension
- * (019 FR-008). Core contains no knowledge of this module.
+ * <p>{@code matchIfMissing = true} so an upgrade never silently disables a working extension.
+ * Core contains no knowledge of this module.
  */
 @AutoConfiguration
 @ConditionalOnProperty(name = "multiroom.tts.enabled", havingValue = "true", matchIfMissing = true)
@@ -47,19 +48,24 @@ public class TtsAutoConfiguration {
         Map<String, TtsProvider> providers = new LinkedHashMap<>();
         for (TtsProviderConfig config : properties.getProviders()) {
             if (config.isEnabled()) {
-                providers.put(config.getName(), buildProvider(config));
+                providers.put(config.getName(), buildProvider(config, properties));
             }
         }
         return new ProviderRegistry(providers, properties.getDefaultProvider());
     }
 
-    private TtsProvider buildProvider(TtsProviderConfig config) {
+    private TtsProvider buildProvider(TtsProviderConfig config, TtsProperties properties) {
         return switch (config.getType()) {
             case OPENAI -> new OpenAiTtsProvider(config);
-            case GOOGLE_CLOUD -> new GoogleCloudTtsProvider(config);
+            case GOOGLE_CLOUD -> new GoogleCloudTtsProvider(config, properties.getVoiceCatalogue());
             case PIPER -> new PiperTtsProvider(config);
             case LOCAL_HTTP -> new LocalHttpTtsProvider(config);
         };
+    }
+
+    @Bean
+    public VoiceQueryService voiceQueryService(TtsProperties properties, ProviderRegistry providerRegistry) {
+        return new VoiceQueryService(properties, providerRegistry);
     }
 
     @Bean

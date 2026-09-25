@@ -65,7 +65,7 @@ class PiperTtsProviderTest {
 
         new PiperTtsProvider(configFor(fakePython, model, 5));
         // No process-related side effect is observable at construction time; reaching here
-        // without invoking synthesize() is itself the assertion (019 FR-019).
+        // without invoking synthesize() is itself the assertion.
     }
 
     @Test
@@ -76,7 +76,7 @@ class PiperTtsProviderTest {
         Path model = modelWithConfig(dir);
 
         SynthesisResult result = new PiperTtsProvider(configFor(fakePython, model, 5))
-                .synthesize(new SynthesisRequest("hello", "ryan", "en-US", 22050, 1));
+                .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("ryan", "en-US", null), 22050, 1));
 
         assertThat(new String(result.audioData(), StandardCharsets.UTF_8)).contains("FAKE_WAV_DATA");
     }
@@ -89,7 +89,7 @@ class PiperTtsProviderTest {
         Path model = modelWithConfig(dir);
 
         assertThatThrownBy(() -> new PiperTtsProvider(configFor(fakePython, model, 5))
-                .synthesize(new SynthesisRequest("hello", "ryan", "en-US", 22050, 1)))
+                .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("ryan", "en-US", null), 22050, 1)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.PROVIDER_ERROR);
@@ -103,9 +103,22 @@ class PiperTtsProviderTest {
         Path model = modelWithConfig(dir);
 
         assertThatThrownBy(() -> new PiperTtsProvider(configFor(fakePython, model, 1))
-                .synthesize(new SynthesisRequest("hello", "ryan", "en-US", 22050, 1)))
+                .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("ryan", "en-US", null), 22050, 1)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.PROVIDER_TIMEOUT);
+    }
+
+    @Test
+    void resolveSettingsKeeps001sRuleAndRejectsGoogleOnlyFields(@TempDir Path dir) throws Exception {
+        TtsProviderConfig config = configFor(dir.resolve("python"), modelWithConfig(dir), 5);
+        config.setVoice("ryan");
+        PiperTtsProvider provider = new PiperTtsProvider(config);
+
+        assertThat(provider.resolveSettings(new RequestedSettings(null, "de-DE", null, null, null)))
+                .isEqualTo(SynthesisSettings.of("ryan", "de-DE", null));
+        assertThatThrownBy(() -> provider.resolveSettings(new RequestedSettings(null, null, "neural2", null, null)))
+                .isInstanceOf(TtsException.class)
+                .hasMessage("Field 'engine' is not supported by provider 'piper-local' of type PIPER");
     }
 }

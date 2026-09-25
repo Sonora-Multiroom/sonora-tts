@@ -83,17 +83,99 @@ start-up one).
 
 ## Google Cloud
 
+A `GOOGLE_CLOUD` entry accepts three shapes. Voices, engines and languages are matched ignoring
+case, and are sent to Google in its own spelling.
+
 ```yaml
 multiroom:
   tts:
     providers:
-      - name: google-cloud
+      # 1. A full voice name (the shape used before 0.1.1, which keeps working unchanged).
+      #    The voice decides its own language and engine; the default engine for short names in
+      #    requests is taken from it (Neural2 here).
+      - name: google
         type: GOOGLE_CLOUD
         api-key: ${GOOGLE_TTS_API_KEY}
         voice: en-US-Neural2-C
+        language: en-US          # optional; the default language for short names in requests
+
+      # 2. Structured: engine + language + a short voice name.
+      - name: google-uk
+        type: GOOGLE_CLOUD
+        api-key: ${GOOGLE_TTS_API_KEY}
+        engine: chirp3-hd
+        language: uk-UA
+        voice: charon            # resolves to uk-UA-Chirp3-HD-Charon
+        speaking-rate: 1.1       # Chirp3-HD supports pace; Google documents no pitch control for it
+
+      # 3. Engine and language only: callers pick the voice; with none, Google chooses one.
+      - name: google-wavenet
+        type: GOOGLE_CLOUD
+        api-key: ${GOOGLE_TTS_API_KEY}
+        engine: wavenet
         language: en-US
-        engine: neural2
 ```
+
+| Key | Meaning |
+|---|---|
+| `voice` | A full name (`uk-UA-Chirp3-HD-Charon`) or a short name (`charon`, `D`) |
+| `engine` | The default engine for short names: `standard`, `wavenet`, `neural2`, `studio`, `chirp-hd` or `chirp3-hd` (case, `-` and `_` are ignored). **Required unless `voice` is a full name** |
+| `language` | A language-region tag (`uk-UA`, `cmn-CN`, `es-419`). The default language for short names; without it, a full `voice`'s own language is the default. Required when `voice` is short. No `en-US` default: a full voice is always synthesized in its own language |
+| `pitch` | Semitones, **[-20.0, 20.0]**. Sent only when set. Not every engine supports it; Google's rejection, if any, is reported with Google's explanation |
+| `speaking-rate` | **[0.25, 2.0]**, where 1.0 is the voice's natural speed. Sent only when set |
+| `extra-params` | Must be empty for `GOOGLE_CLOUD`; use `pitch` and `speaking-rate` |
+| `timeout-seconds` | The whole budget for one synthesis, including a voice-catalogue fetch |
+
+How a request's `voice`, `engine` and `language` combine with these:
+
+- A **full** voice name is used as given. Its language and engine come from the name, and a
+  request `language` or `engine` that contradicts it is a `400 INVALID_REQUEST`.
+- A **short** voice name is completed with the request's `engine` (or else the entry's default
+  engine) and the request's `language` (or else the entry's default language). Other engines are
+  never searched: `D` on a Chirp3-HD entry is looked up as a Chirp3-HD voice only.
+- With **no voice** anywhere, the language is the request's, then the entry's, then `en-US`, and
+  Google picks the voice.
+
+**The voice catalogue.** On a cache miss, the resolved voice is checked against Google's
+published voice list (`GET v1/voices`), which each entry fetches on first need and keeps in
+memory. An unknown voice is a `400 INVALID_VOICE` listing the voices of the same engine and
+language. If the list cannot be fetched, the check is skipped and synthesis goes ahead, and no new
+fetch is tried until the back-off passes. Nothing is fetched at start-up. The timings are global:
+
+```yaml
+multiroom:
+  tts:
+    voice-catalogue:
+      ttl: 24h               # how long a fetched list is trusted
+      failure-backoff: 60s   # no new fetch this long after a failure; also the minimum age
+                             # before a voice missing from the list triggers a refetch
+      fetch-timeout: 3s      # cap on one fetch, taken out of the entry's timeout-seconds
+```
+
+To see which voices an entry offers:
+
+```http
+GET /api/tts/providers/google/voices?language=uk-UA&engine=chirp3-hd
+```
+
+Both filters are optional. Other provider types answer `400`, and an unreachable catalogue `503`.
+
+**Start-up faults.** Each of these aborts host start-up with
+`multiroom-tts: provider '<name>' …`, without contacting Google:
+
+- `engine` is not one of the six engines above (the message lists them);
+- `language` is not a language-region tag, or `voice` is neither a full nor a short name;
+- there is no `engine` and `voice` is not a full name ("an engine is required");
+- `voice` is short and there is no `language`;
+- `pitch` or `speaking-rate` is out of range (the message states the range);
+- `extra-params` is not empty.
+
+A `language` that differs from a full `voice`'s own language is only a warning.
+
+> **Upgrading from 0.1.0:** `engine` on a `GOOGLE_CLOUD` entry used to be a free-text cache label.
+> It is now validated, so an entry with any other label fails start-up until the label is removed
+> or corrected. Existing cache entries for Google voices are synthesized again once, because the
+> cache key now uses the resolved voice name.
 
 For obtaining the API key — enabling the API, billing, and why a service account JSON won't work
 here — see [google-cloud-tts-setup.md](google-cloud-tts-setup.md).
@@ -135,6 +217,9 @@ The host starts normally, the extension inventory reports `tts` as `DISABLED`, a
 | `cache.dir` | `${user.home}/.multiroom/tts-cache` | Cache root directory |
 | `cache.max-size-mb` | `500` | LRU-evicted once the cache exceeds this |
 | `queue.max-depth-per-target` | `10` | Max pending announcements per output/group |
+| `voice-catalogue.ttl` | `24h` | `GOOGLE_CLOUD` only: how long a fetched voice list is trusted. Must be positive |
+| `voice-catalogue.failure-backoff` | `60s` | `GOOGLE_CLOUD` only: no fetch this long after a failed one. Must be positive |
+| `voice-catalogue.fetch-timeout` | `3s` | `GOOGLE_CLOUD` only: cap on one voice-list fetch. Must be positive |
 
 ### `multiroom.tts.providers[]`
 
@@ -144,9 +229,12 @@ The host starts normally, the extension inventory reports `tts` as `DISABLED`, a
 | `type` | all | `OPENAI`, `GOOGLE_CLOUD`, `PIPER`, or `LOCAL_HTTP` |
 | `enabled` | all | `true` by default; set `false` to keep a config entry without using it |
 | `api-key` | `OPENAI`, `GOOGLE_CLOUD` | Required for these two; validated as non-blank only, never contacted at boot |
-| `voice` | all | Default voice; a request may override it |
-| `language` | all | Default BCP 47 tag (default `en-US`); a request may override it |
-| `engine` | all | Model/engine name (`tts-1`, `neural2`, ...) — folded into the cache key |
+| `voice` | all | Default voice; a request may override it. `GOOGLE_CLOUD`: a full or short name (see [Google Cloud](#google-cloud)) |
+| `language` | all | Default BCP 47 tag; a request may override it. No declared default: other types fall back to `en-US`, `GOOGLE_CLOUD` to the voice's own language |
+| `engine` | all | `OPENAI`: the model (`tts-1`, ...), folded into the cache key. `GOOGLE_CLOUD`: the default engine for short voice names, validated |
+| `pitch` | `GOOGLE_CLOUD` | Semitones, [-20.0, 20.0]. A start-up fault on any other type |
+| `speaking-rate` | `GOOGLE_CLOUD` | [0.25, 2.0]. A start-up fault on any other type |
+| `extra-params` | all but `GOOGLE_CLOUD` | Provider-specific parameters. Must be empty for `GOOGLE_CLOUD` |
 | `timeout-seconds` | all | Default `10`. Raising it trades away the 10 s error-response budget; a start-up `WARN` names any provider configured above 10 |
 | `python-executable` | `PIPER` | Default `python3`. The interpreter with `piper-tts` installed — **not** a Piper binary; piper1-gpl ships no standalone executable, only a `python3 -m piper` module. Not checked at start-up (see above) |
 | `model-path` | `PIPER` | Path to the ONNX voice model; must exist at start-up, and so must `<model-path>.json` next to it |
@@ -247,7 +335,14 @@ Content-Type: application/json
 ```
 
 `providerName`, `voice` and `language` are all optional — omit any of them and the chosen
-provider's configured default is used. `targetType` is `SINGLE_OUTPUT` (target a single output by
+provider's configured default is used. `GOOGLE_CLOUD` providers also accept `engine`, `pitch` and
+`speakingRate`; any other provider type rejects them with `400 INVALID_REQUEST`:
+
+```json
+{ "text": "Dinner is ready", "targetName": "kitchen", "targetType": "SINGLE_OUTPUT",
+  "providerName": "google", "engine": "neural2", "voice": "c", "language": "en-US", "speakingRate": 0.9 }
+```
+ `targetType` is `SINGLE_OUTPUT` (target a single output by
 name) or `OUTPUT_GROUP` (target a group; every output in it plays in sync).
 
 Response (`202 Accepted`):
@@ -257,8 +352,8 @@ Response (`202 Accepted`):
 ```
 
 Errors use a flat `{ "error": "<CODE>", "message": "…" }` shape — see
-[contracts/tts-rest-api.yaml](../specs/001-tts-extension/contracts/tts-rest-api.yaml) for the full
-code list and their HTTP statuses.
+[contracts/tts-rest-api.yaml](../specs/002-google-voice-selection/contracts/tts-rest-api.yaml) for the
+full code list and their HTTP statuses.
 
 ## Managing the cache
 
@@ -273,5 +368,5 @@ GET    /api/tts/cache/stats                 # entry count, size, per-provider br
 - [google-cloud-tts-setup.md](google-cloud-tts-setup.md) — obtaining a Google Cloud API key
 - [specs/001-tts-extension/quickstart.md](../specs/001-tts-extension/quickstart.md) — build, deploy
   and end-to-end walkthrough, including installing Piper
-- [specs/001-tts-extension/contracts/tts-rest-api.yaml](../specs/001-tts-extension/contracts/tts-rest-api.yaml) —
-  the full OpenAPI contract
+- [specs/002-google-voice-selection/contracts/tts-rest-api.yaml](../specs/002-google-voice-selection/contracts/tts-rest-api.yaml) —
+  the full OpenAPI contract (v0.1.1, which supersedes 001's)

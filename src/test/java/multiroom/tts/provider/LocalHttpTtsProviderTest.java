@@ -50,7 +50,7 @@ class LocalHttpTtsProviderTest {
         server.stubFor(post(urlPathEqualTo("/synthesize")).willReturn(aResponse().withStatus(200).withBody(wav)));
 
         SynthesisResult result = new LocalHttpTtsProvider(config(2, null))
-                .synthesize(new SynthesisRequest("hello", "voice-a", "en-US", 48000, 2));
+                .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("voice-a", "en-US", null), 48000, 2));
 
         assertThat(result.audioData()).isEqualTo(wav);
         server.verify(postRequestedFor(urlPathEqualTo("/synthesize"))
@@ -63,7 +63,7 @@ class LocalHttpTtsProviderTest {
 
         String template = "{\"say\":\"{{text}}\",\"v\":\"{{voice}}\",\"lang\":\"{{language}}\"}";
         new LocalHttpTtsProvider(config(2, template))
-                .synthesize(new SynthesisRequest("hi there", "voice-a", "en-US", 48000, 2));
+                .synthesize(new SynthesisRequest("hi there", SynthesisSettings.of("voice-a", "en-US", null), 48000, 2));
 
         server.verify(postRequestedFor(urlPathEqualTo("/synthesize"))
                 .withRequestBody(equalToJson("{\"say\":\"hi there\",\"v\":\"voice-a\",\"lang\":\"en-US\"}")));
@@ -75,9 +75,20 @@ class LocalHttpTtsProviderTest {
                 .willReturn(aResponse().withStatus(200).withFixedDelay(3000)));
 
         assertThatThrownBy(() -> new LocalHttpTtsProvider(config(1, null))
-                .synthesize(new SynthesisRequest("hi", "voice-a", "en-US", 48000, 2)))
+                .synthesize(new SynthesisRequest("hi", SynthesisSettings.of("voice-a", "en-US", null), 48000, 2)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.PROVIDER_TIMEOUT);
+    }
+
+    @Test
+    void resolveSettingsKeeps001sRuleAndRejectsGoogleOnlyFields() {
+        LocalHttpTtsProvider provider = new LocalHttpTtsProvider(config(2, null));
+
+        assertThat(provider.resolveSettings(new RequestedSettings("amy", null, null, null, null)))
+                .isEqualTo(SynthesisSettings.of("amy", "en-US", null));
+        assertThatThrownBy(() -> provider.resolveSettings(new RequestedSettings(null, null, null, 2.0, null)))
+                .isInstanceOf(TtsException.class)
+                .hasMessage("Field 'pitch' is not supported by provider 'local' of type LOCAL_HTTP");
     }
 }

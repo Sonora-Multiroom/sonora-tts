@@ -5,8 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
 import multiroom.tts.config.TtsProviderConfig;
+import multiroom.tts.provider.DefaultSettingsResolution;
+import multiroom.tts.provider.RequestedSettings;
 import multiroom.tts.provider.SynthesisRequest;
 import multiroom.tts.provider.SynthesisResult;
+import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 
 import java.io.IOException;
@@ -24,16 +27,23 @@ public class LocalHttpTtsProvider implements TtsProvider {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private final TtsProviderConfig config;
     private final HttpClient httpClient;
     private final URI endpoint;
     private final String requestTemplate;
     private final Duration timeout;
 
     public LocalHttpTtsProvider(TtsProviderConfig config) {
+        this.config = config;
         this.timeout = Duration.ofSeconds(config.getTimeoutSeconds());
         this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
         this.endpoint = URI.create(config.getEndpoint());
         this.requestTemplate = config.getRequestTemplate();
+    }
+
+    @Override
+    public SynthesisSettings resolveSettings(RequestedSettings requested) {
+        return DefaultSettingsResolution.resolve(config, requested);
     }
 
     @Override

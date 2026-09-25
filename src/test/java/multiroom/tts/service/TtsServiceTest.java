@@ -1,5 +1,6 @@
 package multiroom.tts.service;
 
+import com.github.tomakehurst.wiremock.WireMockServer;
 import multiroom.api.conversion.FormatConverter;
 import multiroom.api.model.AudioOutputDefinition;
 import multiroom.api.model.GroupId;
@@ -25,10 +26,14 @@ import multiroom.tts.config.ProviderType;
 import multiroom.tts.config.QueueProperties;
 import multiroom.tts.config.TtsProperties;
 import multiroom.tts.config.TtsProviderConfig;
+import multiroom.tts.config.VoiceCatalogueProperties;
+import multiroom.tts.provider.DefaultSettingsResolution;
 import multiroom.tts.provider.ProviderRegistry;
 import multiroom.tts.provider.SynthesisRequest;
 import multiroom.tts.provider.SynthesisResult;
+import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
+import multiroom.tts.provider.cloud.GoogleCloudTtsProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,12 +43,23 @@ import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.net.URI;
 import java.nio.ByteBuffer;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.anyRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.anyUrl;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -127,6 +143,14 @@ class TtsServiceTest {
 
         Map<String, TtsProvider> providers = Map.of("openai", openaiProvider, "piper-local", piperProvider);
         ProviderRegistry registry = new ProviderRegistry(providers, "openai");
+        for (Map.Entry<String, TtsProvider> entry : providers.entrySet()) {
+            TtsProviderConfig config = java.util.Arrays.stream(configs)
+                    .filter(c -> c.getName().equals(entry.getKey()))
+                    .findFirst()
+                    .orElseGet(() -> providerConfig(entry.getKey(), null, null, null));
+            when(entry.getValue().resolveSettings(any()))
+                    .thenAnswer(inv -> DefaultSettingsResolution.resolve(config, inv.getArgument(0)));
+        }
 
         return new TtsService(properties, registry, audioConverter, audioCache, inputResolver,
                 deviceRegistryService, deviceQueryService, routeService, completionListener);
@@ -141,7 +165,7 @@ class TtsServiceTest {
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
         AnnounceResult result = service.speak(new AnnounceCommand("Dinner is ready", "living-room",
-                TargetType.SINGLE_OUTPUT, null, null, null));
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null));
 
         assertThat(result.cacheHit()).isFalse();
         verify(openaiProvider).synthesize(any());
@@ -158,7 +182,7 @@ class TtsServiceTest {
         when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
-        service.speak(new AnnounceCommand("Motion detected", "all-rooms", TargetType.OUTPUT_GROUP, null, null, null));
+        service.speak(new AnnounceCommand("Motion detected", "all-rooms", TargetType.OUTPUT_GROUP, null, null, null, null, null, null));
 
         verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), eq(GroupId.of("all-rooms")));
         verify(routeService, never()).createRoute(any(InputId.class), eq(OutputId.of("living-room")));
@@ -174,7 +198,7 @@ class TtsServiceTest {
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
         assertThatThrownBy(() -> service.speak(new AnnounceCommand("Hi", "empty-group",
-                TargetType.OUTPUT_GROUP, null, null, null)))
+                TargetType.OUTPUT_GROUP, null, null, null, null, null, null)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.TARGET_NOT_FOUND);
@@ -187,7 +211,7 @@ class TtsServiceTest {
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
         assertThatThrownBy(() -> service.speak(new AnnounceCommand("Hi", "bedroom",
-                TargetType.SINGLE_OUTPUT, null, null, null)))
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.TARGET_NOT_FOUND);
@@ -199,10 +223,10 @@ class TtsServiceTest {
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
         AnnounceResult result = service.speak(new AnnounceCommand("Dinner is ready", "living-room",
-                TargetType.SINGLE_OUTPUT, null, null, null));
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null));
 
         assertThat(result.cacheHit()).isTrue();
-        verifyNoInteractions(openaiProvider);
+        verify(openaiProvider, never()).synthesize(any());
         verify(audioCache).pin(any());
     }
 
@@ -214,7 +238,7 @@ class TtsServiceTest {
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
         AnnounceResult result = service.speak(new AnnounceCommand("Dinner is ready", "living-room",
-                TargetType.SINGLE_OUTPUT, null, null, null));
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null));
 
         assertThat(result.cacheHit()).isFalse();
         verify(openaiProvider).synthesize(any());
@@ -229,7 +253,7 @@ class TtsServiceTest {
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
         AnnounceResult result = service.speak(new AnnounceCommand("Dinner is ready", "living-room",
-                TargetType.SINGLE_OUTPUT, null, null, null));
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null));
 
         assertThat(result).isNotNull();
         verify(deviceRegistryService, timeout(ASYNC_TIMEOUT_MS)).registerInput(any());
@@ -241,7 +265,7 @@ class TtsServiceTest {
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
         assertThatThrownBy(() -> service.speak(new AnnounceCommand("Hi", "living-room",
-                TargetType.SINGLE_OUTPUT, "nonexistent", null, null)))
+                TargetType.SINGLE_OUTPUT, "nonexistent", null, null, null, null, null)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.PROVIDER_NOT_FOUND);
@@ -261,7 +285,7 @@ class TtsServiceTest {
                 providerConfig("piper-local", "ryan", "en-US", "default"));
 
         service.speak(new AnnounceCommand("Hi", "living-room", TargetType.SINGLE_OUTPUT,
-                "piper-local", null, null));
+                "piper-local", null, null, null, null, null));
 
         verify(piperProvider).synthesize(any());
         verifyNoInteractions(openaiProvider);
@@ -275,9 +299,9 @@ class TtsServiceTest {
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
         service.speak(new AnnounceCommand("Hi", "living-room", TargetType.SINGLE_OUTPUT,
-                null, "nova", "fr-FR"));
+                null, "nova", "fr-FR", null, null, null));
 
-        verify(openaiProvider).synthesize(new SynthesisRequest("Hi", "nova", "fr-FR", 48000, 2));
+        verify(openaiProvider).synthesize(new SynthesisRequest("Hi", SynthesisSettings.of("nova", "fr-FR", "tts-1"), 48000, 2));
 
         var keyCaptor = org.mockito.ArgumentCaptor.forClass(CacheKey.class);
         verify(audioCache).get(keyCaptor.capture());
@@ -297,7 +321,7 @@ class TtsServiceTest {
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
         assertThatThrownBy(() -> service.speak(new AnnounceCommand("Hi", "living-room",
-                TargetType.SINGLE_OUTPUT, null, null, null)))
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.PROVIDER_TIMEOUT);
@@ -308,7 +332,7 @@ class TtsServiceTest {
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
         assertThatThrownBy(() -> service.speak(new AnnounceCommand("  ", "living-room",
-                TargetType.SINGLE_OUTPUT, null, null, null)))
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null)))
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.INVALID_REQUEST);
@@ -323,7 +347,7 @@ class TtsServiceTest {
                 .thenThrow(new RuntimeException("output disappeared"));
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
-        service.speak(new AnnounceCommand("Hi", "living-room", TargetType.SINGLE_OUTPUT, null, null, null));
+        service.speak(new AnnounceCommand("Hi", "living-room", TargetType.SINGLE_OUTPUT, null, null, null, null, null, null));
 
         // No RouteDestroyedEvent will ever arrive for a route that was never created, so the
         // service must clean up directly instead of leaking the tracked entry, the cache pin
@@ -340,7 +364,7 @@ class TtsServiceTest {
         service.stop();
 
         assertThatThrownBy(() -> service.speak(new AnnounceCommand("Hi", "living-room",
-                TargetType.SINGLE_OUTPUT, null, null, null)))
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null)))
                 .isInstanceOf(TtsException.class);
 
         CacheKey cacheKey = new CacheKey("Hi", "openai", "tts-1", "alloy", "en-US", SampleFormat.standard());
@@ -359,7 +383,7 @@ class TtsServiceTest {
         service.stop();
 
         assertThatThrownBy(() -> service.speak(new AnnounceCommand("Hi", "living-room",
-                TargetType.SINGLE_OUTPUT, null, null, null)))
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null)))
                 .isInstanceOf(TtsException.class);
 
         // The announcement will never play, so whatever was playing before must come back —
@@ -376,8 +400,164 @@ class TtsServiceTest {
         when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
-        service.speak(new AnnounceCommand("Hi", "living-room", TargetType.SINGLE_OUTPUT, null, null, null));
+        service.speak(new AnnounceCommand("Hi", "living-room", TargetType.SINGLE_OUTPUT, null, null, null, null, null, null));
 
         verify(routeService).stopRoutesByOutput(OutputId.of("living-room"));
+    }
+
+    @Test
+    void googleOnlyOverrideOnAnOpenAiProviderIsRejectedBeforeAnySynthesis() {
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        assertThatThrownBy(() -> service.speak(new AnnounceCommand("Hi", "living-room",
+                TargetType.SINGLE_OUTPUT, null, null, null, null, -2.0, null)))
+                .isInstanceOf(TtsException.class)
+                .hasMessageContaining("pitch")
+                .hasMessageContaining("OPENAI")
+                .extracting(e -> ((TtsException) e).getErrorCode())
+                .isEqualTo(TtsErrorCode.INVALID_REQUEST);
+
+        verify(openaiProvider, never()).synthesize(any());
+        verify(audioCache, never()).get(any());
+    }
+
+    @Test
+    void theCacheKeyCarriesTheProvidersVoiceKeyNotTheCallersSpelling() {
+        TtsProvider googleProvider = mock(TtsProvider.class);
+        when(googleProvider.resolveSettings(any())).thenReturn(new SynthesisSettings("uk-UA-Chirp3-HD-Charon",
+                "uk-ua-chirp3-hd-charon", "uk-UA-Chirp3-HD-Charon", "uk-UA", null, null, null, null, null));
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+
+        TtsProperties properties = new TtsProperties();
+        properties.setProviders(List.of(providerConfig("google", null, null, null)));
+        TtsService service = new TtsService(properties, new ProviderRegistry(Map.of("google", googleProvider), "google"),
+                audioConverter, audioCache, inputResolver, deviceRegistryService, deviceQueryService, routeService,
+                completionListener);
+
+        service.speak(new AnnounceCommand("Hi", "living-room", TargetType.SINGLE_OUTPUT, "google",
+                "uk-UA-Chirp3-HD-Charon", null, null, null, null));
+
+        var keyCaptor = org.mockito.ArgumentCaptor.forClass(CacheKey.class);
+        verify(audioCache).get(keyCaptor.capture());
+        assertThat(keyCaptor.getValue().voice()).isEqualTo("uk-ua-chirp3-hd-charon");
+        assertThat(keyCaptor.getValue().engineName()).isNull();
+        assertThat(keyCaptor.getValue().language()).isEqualTo("uk-UA");
+        verify(googleProvider, never()).synthesize(any());
+    }
+
+    // --- 002: a real GoogleCloudTtsProvider decides the key -----------------------------------
+
+    /** Production's shape: a full voice, a language, no engine. */
+    private static TtsProviderConfig productionGoogleEntry() {
+        TtsProviderConfig google = new TtsProviderConfig();
+        google.setName("google");
+        google.setType(ProviderType.GOOGLE_CLOUD);
+        google.setApiKey("key");
+        google.setLanguage("en-US");
+        google.setVoice("en-US-Neural2-C");
+        return google;
+    }
+
+    private TtsService realGoogleService(WireMockServer server) {
+        TtsProviderConfig google = productionGoogleEntry();
+        TtsProperties properties = new TtsProperties();
+        properties.setProviders(List.of(google));
+        GoogleCloudTtsProvider provider = new GoogleCloudTtsProvider(google, new VoiceCatalogueProperties(),
+                URI.create(server.baseUrl() + "/v1/"), Clock.systemUTC());
+        return new TtsService(properties, new ProviderRegistry(Map.of("google", provider), "google"),
+                audioConverter, audioCache, inputResolver, deviceRegistryService, deviceQueryService, routeService,
+                completionListener);
+    }
+
+    private static AnnounceCommand googleCommand(String voice, String engine, String language, Double pitch,
+                                                 Double speakingRate) {
+        return new AnnounceCommand("Dinner is ready", "living-room", TargetType.SINGLE_OUTPUT, "google",
+                voice, language, engine, pitch, speakingRate);
+    }
+
+    private List<CacheKey> lookedUpKeys(int expected) {
+        var keyCaptor = org.mockito.ArgumentCaptor.forClass(CacheKey.class);
+        verify(audioCache, org.mockito.Mockito.times(expected)).get(keyCaptor.capture());
+        return keyCaptor.getAllValues();
+    }
+
+    @Test
+    void us2_4_aFullNameAndTheEquivalentShortNameHitOneEntryWithNoHttpCall() {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+            TtsService service = realGoogleService(server);
+
+            service.speak(googleCommand("charon", "chirp3-hd", "uk-UA", null, null));
+            service.speak(googleCommand("uk-UA-Chirp3-HD-Charon", null, null, null, null));
+
+            List<CacheKey> keys = lookedUpKeys(2);
+            assertThat(keys.get(0)).isEqualTo(keys.get(1));
+            assertThat(keys.get(0).toHash()).isEqualTo(keys.get(1).toHash());
+            // A hit costs no catalogue and no synthesis request.
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void sc006_aMissConsultsTheCatalogueOnceAndSynthesizesOnce() throws Exception {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            String catalogue;
+            try (java.io.InputStream in = getClass().getResourceAsStream("/google-voices.json")) {
+                catalogue = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+            server.stubFor(get(urlPathEqualTo("/v1/voices")).willReturn(aResponse().withStatus(200).withBody(catalogue)));
+            server.stubFor(post(urlPathEqualTo("/v1/text:synthesize")).willReturn(aResponse().withStatus(200)
+                    .withBody("{\"audioContent\":\"" + java.util.Base64.getEncoder().encodeToString(fakeProviderWav()) + "\"}")));
+            when(audioCache.get(any())).thenReturn(Optional.empty());
+            when(audioCache.put(any(), any())).thenReturn(java.nio.file.Path.of("cache/hash.wav"));
+
+            AnnounceResult result = realGoogleService(server).speak(googleCommand("charon", "chirp3-hd", "uk-UA", null, null));
+
+            assertThat(result.cacheHit()).isFalse();
+            server.verify(1, getRequestedFor(urlPathEqualTo("/v1/voices")));
+            server.verify(1, postRequestedFor(urlPathEqualTo("/v1/text:synthesize")));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void us4_4_aRateChangeIsADifferentEntryButAnExplicitDefaultIsNot() {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+            TtsService service = realGoogleService(server);
+
+            service.speak(googleCommand(null, null, null, null, null));
+            service.speak(googleCommand(null, null, null, null, 0.9));
+            service.speak(googleCommand(null, null, null, 0.0, 1.0));
+
+            List<CacheKey> keys = lookedUpKeys(3);
+            assertThat(keys.get(1).toHash()).isNotEqualTo(keys.get(0).toHash());
+            assertThat(keys.get(2).toHash()).isEqualTo(keys.get(0).toHash());
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void aNonGoogleCacheKeyHashesExactlyAsIn001() {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+        service.speak(new AnnounceCommand("hello", "living-room", TargetType.SINGLE_OUTPUT, null, null, null,
+                null, null, null));
+
+        // SHA-256 of 001's key for these fields; see CacheKeyTest.
+        assertThat(lookedUpKeys(1).get(0).toHash())
+                .isEqualTo("dab14075da8e7d0f2e73edcf312004775587448c85e231c2d70bd186e1201a58");
     }
 }

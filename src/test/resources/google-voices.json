@@ -1,0 +1,332 @@
+{
+  "voices": [
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Achernar",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Achird",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Algenib",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Algieba",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Alnilam",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Aoede",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Autonoe",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Callirrhoe",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Charon",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Despina",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Enceladus",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Erinome",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Fenrir",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Gacrux",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Iapetus",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Kore",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Laomedeia",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Leda",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Orus",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Puck",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Pulcherrima",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Rasalgethi",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Sadachbia",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Sadaltager",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Schedar",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Sulafat",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Umbriel",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Vindemiatrix",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Zephyr",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "uk-UA"
+      ],
+      "name": "uk-UA-Chirp3-HD-Zubenelgenubi",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Chirp3-HD-Charon",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Chirp3-HD-Kore",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Chirp3-HD-Puck",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Wavenet-A",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Wavenet-B",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Wavenet-C",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Wavenet-D",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Neural2-C",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-Polyglot-1",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "en-US-News-K",
+      "ssmlGender": "FEMALE",
+      "naturalSampleRateHertz": 24000
+    },
+    {
+      "languageCodes": [
+        "en-US"
+      ],
+      "name": "Achird",
+      "ssmlGender": "MALE",
+      "naturalSampleRateHertz": 24000
+    }
+  ]
+}
