@@ -183,8 +183,8 @@ Both filters are optional. Other provider types answer `400`, and an unreachable
 - `extra-params` is not empty;
 - neither or both of `api-key` and `service-account-key-file` are set;
 - the key file does not exist, cannot be read, is not a service account key, lacks
-  `client_email` or a usable `private_key`, or names a `token_uri` that is not `https` (the
-  message shows the absolute path).
+  `client_email` or a usable `private_key`, or names a `token_uri` that is neither `https` nor a
+  loopback address (the message shows the absolute path).
 
 `service-account-key-file` on any other provider type is a start-up fault too.
 
@@ -372,7 +372,7 @@ Response (`202 Accepted`):
 ```
 
 Errors use a flat `{ "error": "<CODE>", "message": "…" }` shape — see
-[contracts/tts-rest-api.yaml](../specs/002-google-voice-selection/contracts/tts-rest-api.yaml) for the
+[contracts/tts-rest-api.yaml](../specs/003-google-service-account-auth/contracts/tts-rest-api.yaml) for the
 full code list and their HTTP statuses.
 
 ## Managing the cache
@@ -388,5 +388,5 @@ GET    /api/tts/cache/stats                 # entry count, size, per-provider br
 - [google-cloud-tts-setup.md](google-cloud-tts-setup.md) — obtaining a Google Cloud API key or service account key
 - [specs/001-tts-extension/quickstart.md](../specs/001-tts-extension/quickstart.md) — build, deploy
   and end-to-end walkthrough, including installing Piper
-- [specs/002-google-voice-selection/contracts/tts-rest-api.yaml](../specs/002-google-voice-selection/contracts/tts-rest-api.yaml) —
-  the full OpenAPI contract (v0.1.1, which supersedes 001's)
+- [specs/003-google-service-account-auth/contracts/tts-rest-api.yaml](../specs/003-google-service-account-auth/contracts/tts-rest-api.yaml) —
+  the full OpenAPI contract (v0.1.2, which supersedes 002's v0.1.1 and 001's)
