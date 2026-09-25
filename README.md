@@ -21,14 +21,17 @@ ordinary dependency injection. It runs no web server of its own and ships no cop
 - Google Cloud voices by full name (`uk-UA-Chirp3-HD-Charon`) or by engine + language + short
   name (`charon`), checked against Google's published voice list, which
   `GET /api/tts/providers/{name}/voices` also exposes
+- Google Cloud authentication by API key or by a service account's JSON key, exchanged for
+  short-lived access tokens with no Google library bundled
 - Disk cache keyed by text + provider/model + voice/language + audio format, surviving restarts,
   LRU-evicted at a configurable size
 - Playback through an ephemeral registered input; the target's prior state is restored when the
   host destroys the announcement's route
 
-Status: **implemented, `mvn verify` green.** See [specs/001-tts-extension/](specs/001-tts-extension/)
-for the spec and [tasks.md](specs/001-tts-extension/tasks.md) for what's verified versus what still
-needs real audio hardware.
+Status: **implemented, `mvn verify` green**, at version 0.1.2 with features 001 to 003. See
+[specs/001-tts-extension/](specs/001-tts-extension/) for the base spec and
+[tasks.md](specs/001-tts-extension/tasks.md) for what's verified versus what still needs real audio
+hardware.
 
 ## Requirements
 
@@ -65,7 +68,8 @@ not that it loads.
 ## Configuration
 
 Lives in the **host's** configuration file (`multiroom.yml`), under `multiroom.tts`. Provider
-credentials belong there — via environment variables — and never in this repository.
+credentials belong there — API keys via environment variables, a Google service account key as a
+file on the host — and never in this repository.
 
 `multiroom.tts.enabled=false` disables the extension without removing the JAR.
 
@@ -77,8 +81,10 @@ examples for every provider type, and how to trigger an announcement and manage 
 | Document | What it covers |
 |---|---|
 | [docs/configuration.md](docs/configuration.md) | How to configure providers, cache and queue; triggering announcements |
+| [docs/google-cloud-tts-setup.md](docs/google-cloud-tts-setup.md) | Setting up Google Cloud: billing, the API, an API key or a service account key |
 | [AGENTS.md](AGENTS.md) | How to work in this repository, and the rules across the repo boundary |
 | [.specify/memory/constitution.md](.specify/memory/constitution.md) | Engineering principles, the merge gate, the extension boundary |
 | [specs/001-tts-extension/](specs/001-tts-extension/) | The feature: spec, plan, tasks, contracts |
-| [specs/002-google-voice-selection/](specs/002-google-voice-selection/) | Google Cloud voice selection; its REST contract (v0.1.1) supersedes 001's |
+| [specs/002-google-voice-selection/](specs/002-google-voice-selection/) | Google Cloud voice selection |
+| [specs/003-google-service-account-auth/](specs/003-google-service-account-auth/) | Google Cloud service account authentication; its REST contract (v0.1.2) is the current one |
 | [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |

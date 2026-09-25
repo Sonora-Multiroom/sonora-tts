@@ -140,11 +140,12 @@ today. The third does not:**
   token-priced, **no free tier**). Google accepts them on the same `v1/text:synthesize` endpoint
   (`voice.modelName`), but **not with an API key**: tested on 2026-09-24, a plain key gets
   `403 IAM_PERMISSION_DENIED` (`aiplatform.endpoints.predict`) and a key bound to a service
-  account gets `401`. Only OAuth works there. They can be reached with a bound API key through
-  Agent Platform's own `generateContent` endpoint instead. That needs the Agent Platform API
-  enabled, a service account with the **Agent Platform User** role, and a different
-  request and response format. `GoogleCloudTtsProvider` doesn't call either endpoint, and support
-  is planned as a separate provider (a later feature). See
+  account gets `401`. Only OAuth works there: a [service account key](#option-b-a-service-account-key)
+  now provides that credential, but the extension does not send `voice.modelName` yet. They can
+  also be reached with a bound API key through Agent Platform's own `generateContent` endpoint.
+  That needs the Agent Platform API enabled, a service account with the **Agent Platform User**
+  role, and a different request and response format. `GoogleCloudTtsProvider` supports neither
+  path, and Gemini support is planned as a later feature. See
   [future/google-cloud-gemini-tts-params.md](future/google-cloud-gemini-tts-params.md).
 
 Within Legacy + Latest (what this extension can actually use): `Chirp3-HD` and `Neural2` sound
@@ -154,7 +155,7 @@ most natural; `Standard`/`WaveNet` are cheaper; `Studio` is the most expensive.
 [docs.cloud.google.com/text-to-speech/docs/list-voices-and-types](https://docs.cloud.google.com/text-to-speech/docs/list-voices-and-types),
 `Neural2`/`WaveNet`/`Standard`/`Studio` support
 [SSML](https://docs.cloud.google.com/text-to-speech/docs/ssml); `Chirp3-HD` does not. Not relevant
-today — `GoogleCloudTtsProvider.buildRequest()` only ever populates `input.text`, never
+today — `GoogleCloudTtsProvider` only ever populates `input.text`, never
 `input.ssml` — but matters if SSML input is ever added: it would need to be conditional on the
 selected voice family, unavailable for `Chirp3-HD`.
 
