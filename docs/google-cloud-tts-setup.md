@@ -1,8 +1,14 @@
 # Setting up Google Cloud Text-to-Speech
 
-`GoogleCloudTtsProvider` authenticates with a plain API key on the query string (`?key=...`), not
-OAuth. This walks through obtaining that key. See
-[configuration.md](configuration.md#google-cloud) for the extension-side YAML.
+A `google-cloud` entry authenticates with **exactly one** of two credentials:
+
+- **Option A: an API key** (`api-key`), sent on the query string (`?key=...`). Steps 4 and 5.
+- **Option B: a service account key** (`service-account-key-file`), the JSON file Google issues
+  for a service account. The entry exchanges it for a short-lived access token and sends
+  `Authorization: Bearer ...` instead. See [Option B](#option-b-a-service-account-key).
+
+Steps 1 to 3 are the same for both. See [configuration.md](configuration.md#google-cloud) for the
+extension-side YAML.
 
 ## 1. Create or select a project
 
@@ -34,7 +40,7 @@ Direct link: [console.cloud.google.com/marketplace/product/google/texttospeech.g
 
 Or navigate manually: search bar at the top → "Cloud Text-to-Speech API" → open it → **Enable**.
 
-## 4. Create an API key
+## 4. Option A: create an API key
 
 Do this from the *general* Credentials page, not the API's own details page — that page only
 offers **OAuth client ID** and **Service account**, no plain API key option.
@@ -48,7 +54,7 @@ offers **OAuth client ID** and **Service account**, no plain API key option.
    API"*). Agent Platform matters only for Gemini voices (see [Voices](#voices)).
 4. Copy the generated key
 
-## 5. Use it in config
+## 5. Option A: use it in config
 
 ```yaml
 multiroom:
@@ -70,14 +76,54 @@ label, so an entry with any other label now needs it removed or corrected. See
 [configuration.md](configuration.md#google-cloud) for the other accepted shapes, `pitch` and
 `speaking-rate`.
 
-## A service account JSON is not what you need here
+## Option B: a service account key
 
-If you instead created a **Service account** and downloaded its JSON (`private_key`,
-`client_email`, `project_id`, ...), that's a different credential type built for OAuth
-server-to-server auth. It will not work with the current provider as-is. Using one would require
-exchanging it for a bearer token and switching `GoogleCloudTtsProvider` to
-`Authorization: Bearer <token>` instead of the `?key=` query param — a code change, not just
-configuration. Delete or ignore that JSON and create a plain API key via step 4 instead.
+Use this when your organisation forbids long-lived API keys, when you want IAM to scope and revoke
+the credential, or when you already have a service account's JSON key.
+
+1. **Create the service account in the project where the Text-to-Speech API is enabled** (step
+   3): ☰ → **IAM & Admin** → **Service accounts** → **+ Create service account**. Give it a name
+   such as `sonora-tts`.
+2. **Roles**: grant none at first. If the first announcement fails with `HTTP 403` and Google's
+   explanation names `serviceusage.services.use`, grant the account **Service Usage Consumer**
+   (`roles/serviceusage.serviceUsageConsumer`) on the project and try again. The **Agent Platform
+   User** role is only for Gemini voices and is not needed here.
+3. **Create and download a JSON key**: open the account → **Keys** → **Add key** → **Create new
+   key** → **JSON**. The browser downloads a file with `"type": "service_account"`,
+   `client_email` and `private_key`. Google shows this key once; keep the file.
+4. **Put it on the host** outside any web root, readable by the user the host runs as, and by no
+   one else if you can (`chmod 600`). The extension does not check the file's permissions.
+5. **Point the entry at it**, instead of `api-key`:
+
+   ```yaml
+   multiroom:
+     tts:
+       providers:
+         - name: google-cloud
+           type: GOOGLE_CLOUD
+           service-account-key-file: /home/tiger/.config/multiroom/sonora-tts-sa.json
+           voice: en-US-Neural2-C
+   ```
+
+Things to know:
+
+- **Exactly one of `api-key` and `service-account-key-file`.** Both, or neither, aborts start-up.
+- **Use an absolute path.** A relative path resolves against the host's working directory, which
+  under systemd is usually `/`. If no file is there, start-up aborts and the message shows the
+  absolute path it tried. `~` is not expanded.
+- **The file is read once, at start-up.** It is checked then (a service account key, with an
+  identity and a usable private key), and a broken file aborts start-up naming the entry and the
+  path. Start-up makes no request to Google: the first token is fetched on the first announcement,
+  voice check or voice listing.
+- **Rotating the key needs a restart.** Replace the file, then restart the host. Until then the
+  entry keeps using the key it read at start-up.
+- **Token failures explain themselves.** A revoked key or a disabled account fails the
+  announcement with Google's own explanation, for example
+  `Provider 'google-cloud' could not obtain an access token: Google rejected the service account key (HTTP 400): Invalid JWT Signature. (invalid_grant)`.
+  Fix the cause on Google's side; the next announcement tries again with no restart. An
+  unreachable token service is held off for `voice-catalogue.failure-backoff` (default 60 s).
+- **An organisation policy that blocks key creation** (`iam.disableServiceAccountKeyCreation`)
+  means you cannot download a key, and this option cannot help. Use an API key (Option A) instead.
 
 ## Voices
 
@@ -96,7 +142,7 @@ today. The third does not:**
   Agent Platform's own `generateContent` endpoint instead. That needs the Agent Platform API
   enabled, a service account with the **Agent Platform User** role, and a different
   request and response format. `GoogleCloudTtsProvider` doesn't call either endpoint, and support
-  is planned as a separate provider (feature `003`). See
+  is planned as a separate provider (a later feature). See
   [future/google-cloud-gemini-tts-params.md](future/google-cloud-gemini-tts-params.md).
 
 Within Legacy + Latest (what this extension can actually use): `Chirp3-HD` and `Neural2` sound

@@ -1,10 +1,13 @@
 package multiroom.tts;
 
+import com.github.tomakehurst.wiremock.WireMockServer;
 import multiroom.api.conversion.FormatConverter;
 import multiroom.api.services.DeviceQueryService;
 import multiroom.api.services.DeviceRegistryService;
 import multiroom.api.services.RouteService;
 import multiroom.tts.audio.TtsInputResolver;
+import multiroom.tts.provider.ProviderRegistry;
+import multiroom.tts.provider.cloud.google.TestServiceAccountKeys;
 import multiroom.tts.rest.TtsCacheController;
 import multiroom.tts.config.TtsProperties;
 import multiroom.tts.rest.TtsController;
@@ -12,12 +15,18 @@ import multiroom.tts.rest.TtsVoiceController;
 import multiroom.tts.service.TtsService;
 import multiroom.tts.service.VoiceQueryService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.assertj.AssertableApplicationContext;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Map;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.anyRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.anyUrl;
+import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
@@ -99,5 +108,67 @@ class TtsAutoConfigurationTest {
             assertThat(context).doesNotHaveBean(TtsVoiceController.class);
             assertThat(context.getStartupFailure()).isNull();
         });
+    }
+
+    // --- 003: a service-account entry ---------------------------------------------------------
+
+    private ApplicationContextRunner withServiceAccount(String keyFile) {
+        return contextRunner.withPropertyValues(
+                "multiroom.tts.providers[1].name=google",
+                "multiroom.tts.providers[1].type=google-cloud",
+                "multiroom.tts.providers[1].service-account-key-file=" + keyFile,
+                "multiroom.tts.providers[1].voice=en-US-Neural2-C");
+    }
+
+    @Test
+    void aServiceAccountEntryStartsWithNoRequestToGoogle(@TempDir Path dir) {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            Path keyFile = TestServiceAccountKeys.write(dir, server.baseUrl() + "/token");
+
+            withServiceAccount(keyFile.toString()).run(context -> {
+                assertThat(context.getStartupFailure()).isNull();
+                assertThat(context).hasSingleBean(ProviderRegistry.class);
+            });
+
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void aMissingKeyFileAbortsStartUpNamingTheAbsolutePath(@TempDir Path dir) {
+        Path missing = dir.resolve("absent.json");
+
+        withServiceAccount(missing.toString()).run(context -> assertThat(context.getStartupFailure())
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .rootCause()
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining(missing.toAbsolutePath().toString())
+                .hasMessageContaining("does not exist"));
+    }
+
+    @Test
+    void aKeyFileOfTheWrongTypeAbortsStartUp(@TempDir Path dir) {
+        Path wrongType = TestServiceAccountKeys.write(dir, Map.of("type", "authorized_user"));
+
+        withServiceAccount(wrongType.toString()).run(context -> assertThat(context.getStartupFailure())
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .rootCause()
+                .hasMessageStartingWith("multiroom-tts: provider 'google'")
+                .hasMessageContaining(wrongType.toAbsolutePath().toString())
+                .hasMessageContaining("'authorized_user'"));
+    }
+
+    @Test
+    void aDisabledExtensionNeverReadsTheKeyFile(@TempDir Path dir) {
+        withServiceAccount(dir.resolve("absent.json").toString())
+                .withPropertyValues("multiroom.tts.enabled=false")
+                .run(context -> {
+                    assertThat(context.getStartupFailure()).isNull();
+                    assertThat(context).doesNotHaveBean(ProviderRegistry.class);
+                });
     }
 }

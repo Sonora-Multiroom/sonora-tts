@@ -3,9 +3,10 @@ package multiroom.tts;
 /**
  * The closed set of error codes the REST contract publishes, one constant per value of the
  * {@code ErrorResponse.error} enum in
- * {@code specs/002-google-voice-selection/contracts/tts-rest-api.yaml} (v0.1.1). From 0.1.1 on
- * that contract's version is the JAR's version; it supersedes 001's independently numbered
- * v0.3.0. Nothing below {@code rest} may invent a code outside this set.
+ * {@code specs/003-google-service-account-auth/contracts/tts-rest-api.yaml} (v0.1.2), which
+ * supersedes 002's copy and adds no code. From 0.1.1 on that contract's version is the JAR's
+ * version; it supersedes 001's independently numbered v0.3.0. Nothing below {@code rest} may
+ * invent a code outside this set.
  */
 public enum TtsErrorCode {
     INVALID_REQUEST,

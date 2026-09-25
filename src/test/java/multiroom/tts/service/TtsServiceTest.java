@@ -34,8 +34,11 @@ import multiroom.tts.provider.SynthesisResult;
 import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.provider.cloud.GoogleCloudTtsProvider;
+import multiroom.tts.provider.cloud.google.ServiceAccountKey;
+import multiroom.tts.provider.cloud.google.TestServiceAccountKeys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioFormat;
@@ -459,10 +462,13 @@ class TtsServiceTest {
     }
 
     private TtsService realGoogleService(WireMockServer server) {
-        TtsProviderConfig google = productionGoogleEntry();
+        return realGoogleService(server, productionGoogleEntry(), null);
+    }
+
+    private TtsService realGoogleService(WireMockServer server, TtsProviderConfig google, ServiceAccountKey key) {
         TtsProperties properties = new TtsProperties();
         properties.setProviders(List.of(google));
-        GoogleCloudTtsProvider provider = new GoogleCloudTtsProvider(google, new VoiceCatalogueProperties(),
+        GoogleCloudTtsProvider provider = new GoogleCloudTtsProvider(google, new VoiceCatalogueProperties(), key,
                 URI.create(server.baseUrl() + "/v1/"), Clock.systemUTC());
         return new TtsService(properties, new ProviderRegistry(Map.of("google", provider), "google"),
                 audioConverter, audioCache, inputResolver, deviceRegistryService, deviceQueryService, routeService,
@@ -559,5 +565,32 @@ class TtsServiceTest {
         // SHA-256 of 001's key for these fields; see CacheKeyTest.
         assertThat(lookedUpKeys(1).get(0).toHash())
                 .isEqualTo("dab14075da8e7d0f2e73edcf312004775587448c85e231c2d70bd186e1201a58");
+    }
+
+    // --- 003: how an entry authenticates never enters the cache key ---------------------------
+
+    @Test
+    void theCredentialNeverEntersTheCacheKeyAndAHitNeverAsksForAToken(@TempDir java.nio.file.Path keyDir) {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+            TtsProviderConfig serviceAccountEntry = productionGoogleEntry();
+            serviceAccountEntry.setApiKey(null);
+            serviceAccountEntry.setServiceAccountKeyFile("sa.json");
+            ServiceAccountKey key = ServiceAccountKey.load("google",
+                    TestServiceAccountKeys.write(keyDir, server.baseUrl() + "/token"));
+
+            realGoogleService(server).speak(googleCommand("charon", "chirp3-hd", "uk-UA", null, null));
+            realGoogleService(server, serviceAccountEntry, key).speak(googleCommand("charon", "chirp3-hd", "uk-UA", null, null));
+
+            List<CacheKey> keys = lookedUpKeys(2);
+            assertThat(keys.get(0)).isEqualTo(keys.get(1));
+            assertThat(keys.get(0).toHash()).isEqualTo(keys.get(1).toHash());
+            // A hit returns before the provider is called: no token, no catalogue, no synthesis.
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
     }
 }

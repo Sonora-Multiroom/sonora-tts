@@ -14,11 +14,16 @@ import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.provider.VoiceCatalogueProvider;
 import multiroom.tts.provider.cloud.google.CatalogueVoice;
+import multiroom.tts.provider.cloud.google.GoogleAccessTokenCache;
+import multiroom.tts.provider.cloud.google.GoogleCredential;
 import multiroom.tts.provider.cloud.google.GoogleErrorBody;
+import multiroom.tts.provider.cloud.google.GoogleTokenExchange;
 import multiroom.tts.provider.cloud.google.GoogleVoiceCatalogue;
 import multiroom.tts.provider.cloud.google.GoogleVoiceCatalogue.CheckResult;
 import multiroom.tts.provider.cloud.google.GoogleVoiceName;
 import multiroom.tts.provider.cloud.google.GoogleVoiceResolver;
+import multiroom.tts.provider.cloud.google.ServiceAccountAssertion;
+import multiroom.tts.provider.cloud.google.ServiceAccountKey;
 
 import java.io.IOException;
 import java.net.URI;
@@ -33,6 +38,8 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -42,8 +49,13 @@ import java.util.stream.Collectors;
  *
  * <p>This class only orchestrates: voice resolution is {@link GoogleVoiceResolver}'s, the voice
  * existence check is {@link GoogleVoiceCatalogue}'s, and reading Google's error explanation is
- * {@link GoogleErrorBody}'s. Messages name the configured entry, not the provider type, so a
- * caller can tell two {@code google-cloud} entries apart.
+ * {@link GoogleErrorBody}'s, and proving the entry's identity is its {@link GoogleCredential}'s.
+ * Messages name the configured entry, not the provider type, so a caller can tell two
+ * {@code google-cloud} entries apart.
+ *
+ * <p>Every request, synthesis and voice catalogue alike, goes through one authorised send. For a
+ * service account, an HTTP 401 there discards the token, obtains a new one and resends once;
+ * never on 403, which is a missing permission rather than a stale token, and never twice.
  */
 public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvider {
 
@@ -59,13 +71,18 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
     private final HttpClient httpClient;
     private final URI synthesizeEndpoint;
     private final URI voicesEndpoint;
-    private final String apiKey;
+    private final GoogleCredential credential;
     private final Duration timeout;
     private final Duration fetchTimeout;
     private final Clock clock;
 
-    public GoogleCloudTtsProvider(TtsProviderConfig config, VoiceCatalogueProperties catalogueProperties) {
-        this(config, catalogueProperties, DEFAULT_API_BASE, Clock.systemUTC());
+    /**
+     * @param serviceAccountKey the entry's loaded key file, or {@code null} to authenticate with
+     *                          its {@code api-key}
+     */
+    public GoogleCloudTtsProvider(TtsProviderConfig config, VoiceCatalogueProperties catalogueProperties,
+                                  ServiceAccountKey serviceAccountKey) {
+        this(config, catalogueProperties, serviceAccountKey, DEFAULT_API_BASE, Clock.systemUTC());
     }
 
     /**
@@ -76,7 +93,7 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
      *                against it
      */
     public GoogleCloudTtsProvider(TtsProviderConfig config, VoiceCatalogueProperties catalogueProperties,
-                                  URI apiBase, Clock clock) {
+                                  ServiceAccountKey serviceAccountKey, URI apiBase, Clock clock) {
         this.name = config.getName();
         this.resolver = new GoogleVoiceResolver(config);
         this.timeout = Duration.ofSeconds(config.getTimeoutSeconds());
@@ -84,7 +101,13 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
         // "./": a bare "text:synthesize" would parse as a URI with the scheme "text".
         this.synthesizeEndpoint = apiBase.resolve("./text:synthesize");
         this.voicesEndpoint = apiBase.resolve("voices");
-        this.apiKey = config.getApiKey();
+        // One token cache per entry, never shared; constructing it contacts nothing.
+        this.credential = serviceAccountKey == null
+                ? new GoogleCredential.ApiKey(config.getApiKey())
+                : new GoogleCredential.ServiceAccount(new GoogleAccessTokenCache(name,
+                        new ServiceAccountAssertion(serviceAccountKey, ServiceAccountAssertion.CLOUD_PLATFORM_SCOPE, clock),
+                        new GoogleTokenExchange(name, httpClient, serviceAccountKey.tokenUri())::exchange,
+                        serviceAccountKey.clientEmail(), catalogueProperties.getFailureBackoff(), clock));
         this.fetchTimeout = catalogueProperties.getFetchTimeout();
         this.clock = clock;
         // One catalogue per entry, never shared; constructing it fetches nothing.
@@ -106,22 +129,33 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
     }
 
     /**
-     * Checks the voice against the catalogue, then synthesizes. Both share the entry's
-     * {@code timeout-seconds}: the catalogue gets at most {@code fetch-timeout} of it, so a hung
-     * catalogue still leaves time to synthesize.
+     * Obtains the credential, checks the voice against the catalogue, then synthesizes. All three
+     * share the entry's {@code timeout-seconds}: the catalogue gets at most {@code fetch-timeout}
+     * of it, so a hung catalogue still leaves time to synthesize.
+     *
+     * <p>A service account's token comes first, so a token failure is reported as itself and asks
+     * Google for a token once, instead of surfacing through the catalogue's shorter budget and
+     * back-off.
      *
      * @throws TtsException {@link TtsErrorCode#INVALID_VOICE} for a voice the loaded catalogue
-     *                      lacks, before any synthesis call
+     *                      lacks, before any synthesis call; the token failure, unchanged, when no
+     *                      token can be had
      */
     @Override
     public SynthesisResult synthesize(SynthesisRequest request) {
         Instant deadline = clock.instant().plus(timeout);
+        credential.prepare(remaining(deadline));
         String voice = request.voice() == null ? null : checkVoice(request.settings(), remaining(deadline));
-        HttpRequest httpRequest = buildRequest(request, voice, max(remaining(deadline), MIN_SYNTHESIS_TIMEOUT));
+        // A cache read: picks up a token renewed by a 401 on the catalogue fetch.
+        Optional<String> token = credential.prepare(remaining(deadline));
+        String body = requestBody(request, voice);
 
         HttpResponse<String> response;
         try {
-            response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            response = send(t -> credential.authorize(synthesizeEndpoint, t, max(remaining(deadline), MIN_SYNTHESIS_TIMEOUT))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build(), token, deadline);
         } catch (HttpTimeoutException e) {
             throw new TtsException(TtsErrorCode.PROVIDER_TIMEOUT,
                     "Provider '" + name + "' did not respond within " + timeout.getSeconds() + " seconds", e);
@@ -174,15 +208,21 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
                         .collect(Collectors.joining(", "));
     }
 
-    /** The catalogue's fetcher: {@code GET v1/voices} with no language, so one call lists every voice. */
+    /**
+     * The catalogue's fetcher: {@code GET v1/voices} with no language, so one call lists every
+     * voice. It obtains its own token: on the listing path this is the entry's first token
+     * request, and a failure to get one fails the fetch, which starts the catalogue's back-off.
+     */
     private String fetchCatalogue(Duration fetchBudget) throws IOException {
-        HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(voicesEndpoint + "?key=" + apiKey))
-                .timeout(max(fetchBudget, Duration.ofMillis(1)))
-                .GET()
-                .build();
+        Instant deadline = clock.instant().plus(fetchBudget);
         HttpResponse<String> response;
         try {
-            response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            Optional<String> token = credential.prepare(fetchBudget);
+            response = send(t -> credential.authorize(voicesEndpoint, t, max(remaining(deadline), Duration.ofMillis(1)))
+                    .GET()
+                    .build(), token, deadline);
+        } catch (TtsException e) {
+            throw new IOException(e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted", e);
@@ -193,12 +233,28 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
         return response.body();
     }
 
+    /**
+     * Sends the request {@code build} makes for a token, and on an HTTP 401 that the credential
+     * can answer, renews the token within what is left of {@code deadline} and resends once.
+     */
+    private HttpResponse<String> send(Function<String, HttpRequest> build, Optional<String> token, Instant deadline)
+            throws IOException, InterruptedException {
+        HttpResponse<String> response = httpClient.send(build.apply(token.orElse(null)),
+                HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() == 401 && credential.retriesUnauthorized()) {
+            credential.discard(token.orElse(null));
+            Optional<String> renewed = credential.prepare(remaining(deadline));
+            response = httpClient.send(build.apply(renewed.orElse(null)), HttpResponse.BodyHandlers.ofString());
+        }
+        return response;
+    }
+
     /** {@code ": <Google's message>"}, or nothing when the body carries none. */
     private static String explanation(HttpResponse<String> response) {
         return GoogleErrorBody.message(response.body()).map(message -> ": " + message).orElse("");
     }
 
-    private HttpRequest buildRequest(SynthesisRequest request, String voiceName, Duration requestTimeout) {
+    private static String requestBody(SynthesisRequest request, String voiceName) {
         Map<String, Object> input = Map.of("text", request.text());
         Map<String, Object> voice = new LinkedHashMap<>();
         voice.put("languageCode", request.language());
@@ -218,11 +274,7 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
         Map<String, Object> body = Map.of("input", input, "voice", voice, "audioConfig", audioConfig);
 
         try {
-            return HttpRequest.newBuilder(URI.create(synthesizeEndpoint + "?key=" + apiKey))
-                    .timeout(requestTimeout)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
-                    .build();
+            return MAPPER.writeValueAsString(body);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize Google Cloud TTS request", e);
         }

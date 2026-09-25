@@ -116,8 +116,20 @@ multiroom:
         language: en-US
 ```
 
+Any of these shapes may authenticate with a service account instead of an API key: replace
+`api-key` with the path of the service account's JSON key.
+
+```yaml
+      - name: google
+        type: GOOGLE_CLOUD
+        service-account-key-file: /home/tiger/.config/multiroom/sonora-tts-sa.json
+        voice: en-US-Neural2-C
+```
+
 | Key | Meaning |
 |---|---|
+| `api-key` | A Google Cloud API key. **Exactly one of `api-key` and `service-account-key-file`** |
+| `service-account-key-file` | The path of a service account's JSON key, as Google issues it. Read and checked once at start-up (a replaced file takes effect on restart); never contacted at boot. A relative path resolves against the host's working directory, so prefer an absolute one; `~` is not expanded |
 | `voice` | A full name (`uk-UA-Chirp3-HD-Charon`) or a short name (`charon`, `D`) |
 | `engine` | The default engine for short names: `standard`, `wavenet`, `neural2`, `studio`, `chirp-hd` or `chirp3-hd` (case, `-` and `_` are ignored). **Required unless `voice` is a full name** |
 | `language` | A language-region tag (`uk-UA`, `cmn-CN`, `es-419`). The default language for short names; without it, a full `voice`'s own language is the default. Required when `voice` is short. No `en-US` default: a full voice is always synthesized in its own language |
@@ -168,7 +180,13 @@ Both filters are optional. Other provider types answer `400`, and an unreachable
 - there is no `engine` and `voice` is not a full name ("an engine is required");
 - `voice` is short and there is no `language`;
 - `pitch` or `speaking-rate` is out of range (the message states the range);
-- `extra-params` is not empty.
+- `extra-params` is not empty;
+- neither or both of `api-key` and `service-account-key-file` are set;
+- the key file does not exist, cannot be read, is not a service account key, lacks
+  `client_email` or a usable `private_key`, or names a `token_uri` that is not `https` (the
+  message shows the absolute path).
+
+`service-account-key-file` on any other provider type is a start-up fault too.
 
 A `language` that differs from a full `voice`'s own language is only a warning.
 
@@ -177,8 +195,9 @@ A `language` that differs from a full `voice`'s own language is only a warning.
 > or corrected. Existing cache entries for Google voices are synthesized again once, because the
 > cache key now uses the resolved voice name.
 
-For obtaining the API key — enabling the API, billing, and why a service account JSON won't work
-here — see [google-cloud-tts-setup.md](google-cloud-tts-setup.md).
+For obtaining a credential — enabling the API, billing, creating an API key or a service account
+key, and the roles a service account needs — see
+[google-cloud-tts-setup.md](google-cloud-tts-setup.md).
 
 ## A local HTTP service (Ollama, a custom script, anything that speaks JSON over HTTP)
 
@@ -228,7 +247,8 @@ The host starts normally, the extension inventory reports `tts` as `DISABLED`, a
 | `name` | all | Unique; used in requests (`providerName`) and the cache key |
 | `type` | all | `OPENAI`, `GOOGLE_CLOUD`, `PIPER`, or `LOCAL_HTTP` |
 | `enabled` | all | `true` by default; set `false` to keep a config entry without using it |
-| `api-key` | `OPENAI`, `GOOGLE_CLOUD` | Required for these two; validated as non-blank only, never contacted at boot |
+| `api-key` | `OPENAI`, `GOOGLE_CLOUD` | `OPENAI`: required. `GOOGLE_CLOUD`: exactly one of `api-key` and `service-account-key-file`. Validated as non-blank only, never contacted at boot |
+| `service-account-key-file` | `GOOGLE_CLOUD` | A path to a service account's JSON key. Read and checked once at start-up; never contacted at boot. A start-up fault on any other type |
 | `voice` | all | Default voice; a request may override it. `GOOGLE_CLOUD`: a full or short name (see [Google Cloud](#google-cloud)) |
 | `language` | all | Default BCP 47 tag; a request may override it. No declared default: other types fall back to `en-US`, `GOOGLE_CLOUD` to the voice's own language |
 | `engine` | all | `OPENAI`: the model (`tts-1`, ...), folded into the cache key. `GOOGLE_CLOUD`: the default engine for short voice names, validated |
@@ -365,7 +385,7 @@ GET    /api/tts/cache/stats                 # entry count, size, per-provider br
 
 ## See also
 
-- [google-cloud-tts-setup.md](google-cloud-tts-setup.md) — obtaining a Google Cloud API key
+- [google-cloud-tts-setup.md](google-cloud-tts-setup.md) — obtaining a Google Cloud API key or service account key
 - [specs/001-tts-extension/quickstart.md](../specs/001-tts-extension/quickstart.md) — build, deploy
   and end-to-end walkthrough, including installing Piper
 - [specs/002-google-voice-selection/contracts/tts-rest-api.yaml](../specs/002-google-voice-selection/contracts/tts-rest-api.yaml) —

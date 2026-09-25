@@ -22,7 +22,7 @@ class GoogleErrorBodyTest {
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {"<html><body>Bad Gateway</body></html>", "{}", "{\"error\":{}}",
-            "{\"error\":\"flat\"}", "{\"error\":{\"message\":\"\"}}", "[1,2]", "{\"error\":{\"message\":42}}"})
+            "{\"error\":123}", "{\"error\":\"\"}", "{\"error\":{\"message\":\"\"}}", "[1,2]", "{\"error\":{\"message\":42}}"})
     void anythingElseGivesNoMessage(String body) {
         assertThat(GoogleErrorBody.message(body)).isEmpty();
     }
@@ -33,5 +33,25 @@ class GoogleErrorBodyTest {
 
         assertThat(GoogleErrorBody.message("{\"error\":{\"message\":\"" + longMessage + "\"}}"))
                 .contains("x".repeat(500) + "…");
+    }
+
+    // --- 003: the token service's OAuth error shape -------------------------------------------
+
+    @Test
+    void theOAuthShapeGivesTheDescriptionAndTheErrorCode() {
+        assertThat(GoogleErrorBody.message("{\"error\":\"invalid_grant\",\"error_description\":\"Invalid JWT Signature.\"}"))
+                .contains("Invalid JWT Signature. (invalid_grant)");
+    }
+
+    @Test
+    void theOAuthShapeWithNoDescriptionGivesTheBareError() {
+        assertThat(GoogleErrorBody.message("{\"error\":\"invalid_scope\"}")).contains("invalid_scope");
+    }
+
+    @Test
+    void aVeryLongOAuthDescriptionIsTruncatedTo500CharactersPlusAnEllipsis() {
+        String body = "{\"error\":\"invalid_grant\",\"error_description\":\"" + "y".repeat(600) + "\"}";
+
+        assertThat(GoogleErrorBody.message(body)).contains("y".repeat(500) + "…");
     }
 }

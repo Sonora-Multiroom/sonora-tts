@@ -17,7 +17,7 @@
     </parent>
 
     <artifactId>multiroom-tts</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
     <packaging>jar</packaging>
     <name>multiroom-tts</name>
     <description>Text-to-Speech announcement extension for the multiroom audio system</description>
@@ -106,14 +106,16 @@
     <build>
         <plugins>
             <!-- The constitution's 80% line-coverage floor (III) as a build gate: `mvn verify`
-                 fails below it. Pinned explicitly because the starter does not manage it; 0.8.11
-                 is the version multiroom-ai's root POM uses. A build plugin, so nothing is shaded
-                 into the JAR. The inherited surefire configuration sets no argLine, so
-                 prepare-agent's property is picked up without an @{argLine} merge. -->
+                 fails below it. Pinned explicitly because the starter does not manage it. 0.8.14
+                 rather than multiroom-ai's 0.8.11: 0.8.11 cannot read Java 25 class files, so
+                 building on a JDK 25 floods the test output with instrumentation errors for the
+                 JDK's own classes. A build plugin, so nothing is shaded into the JAR. The
+                 inherited surefire configuration sets no argLine, so prepare-agent's property is
+                 picked up without an @{argLine} merge. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.11</version>
+                <version>0.8.14</version>
                 <executions>
                     <execution>
                         <id>prepare-agent</id>
