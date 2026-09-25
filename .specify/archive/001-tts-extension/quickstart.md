@@ -71,7 +71,7 @@ multiroom:
 > mode (`python3 -m piper.http_server`) that keeps the model warm instead of reloading it per
 > request. **The HTTP server via the existing `LOCAL_HTTP` provider type is the recommended path**
 > — the `PIPER` type (below) still works but reloads the model from disk on every request. See
-> [../../docs/configuration.md](../../docs/configuration.md#installing-piper-on-a-raspberry-pi)
+> [../../docs/configuration.md](../../../docs/configuration.md#installing-piper-on-a-raspberry-pi)
 > for the install steps and the full comparison.
 
 ```yaml
@@ -129,7 +129,7 @@ multiroom:
 ## 4. Install Piper TTS (Local Provider)
 
 Full walkthrough, including the recommended systemd service for `piper.http_server`:
-[../../docs/configuration.md](../../docs/configuration.md#installing-piper-on-a-raspberry-pi).
+[../../docs/configuration.md](../../../docs/configuration.md#installing-piper-on-a-raspberry-pi).
 Summary — piper1-gpl is a Python module (`pip install piper-tts`), not a binary:
 
 ### Linux / Raspberry Pi

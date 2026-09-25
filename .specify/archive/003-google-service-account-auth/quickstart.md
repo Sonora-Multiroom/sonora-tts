@@ -31,7 +31,7 @@ key is committed, and the token service is a WireMock stub reached through a loo
 
 Prerequisite: the `multiroom-ai` checkout, built, with a `multiroom.yml` whose `google-cloud` entry
 uses `service-account-key-file` pointing at a real key file (see
-[docs/google-cloud-tts-setup.md](../../docs/google-cloud-tts-setup.md)).
+[docs/google-cloud-tts-setup.md](../../../docs/google-cloud-tts-setup.md)).
 
 ```powershell
 mvn deploy -Plocal
