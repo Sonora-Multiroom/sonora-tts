@@ -12,9 +12,11 @@ restores whatever the room was doing before.
 - **Trigger**: HTTP, on the host's single port, under this extension's own `/api/tts/**` paths. There
   is no separate authentication layer — access control is whatever guards the shared HTTP surface
 - **Providers**: several may be configured at once, each with a name; one is the default (the first in
-  the list if none is marked). A request may override the provider, the voice and the language
-- **Cache**: on disk, keyed by text + provider type/model + voice/language + **the audio format the
-  entry was converted to**. Survives restarts; LRU eviction at a configurable size
+  the list if none is marked). A request may override the provider, the voice and the language —
+  and, for `google-gemini`, the style prompt
+- **Cache**: on disk, keyed by text + provider type/model + voice/language (+ style prompt, when one
+  is in effect) + **the audio format the entry was converted to**. Survives restarts; LRU eviction
+  at a configurable size
 - **Playback**: the cached WAV is registered as an ephemeral input and routed to the target
   (`SINGLE_OUTPUT` or `OUTPUT_GROUP`, the host's own `TargetType`). Announcements queue behind
   whatever is playing
@@ -50,7 +52,16 @@ API key, and then signs in with short-lived access tokens. No new endpoint or er
 contract ([tts-rest-api.yaml](../archive/003-google-service-account-auth/contracts/tts-rest-api.yaml),
 v0.1.2) is 002's plus a changelog entry.
 
-In progress, not yet archived: `004-gemini-tts-provider` — read [specs/](../../specs/).
+**Gemini voices** in 0.1.3 by `004-gemini-tts-provider` (merged 2026-09-26, archived here
+2026-09-26): a separate `google-gemini` provider type reaching Gemini-TTS through Google's
+Text-to-Speech `v1` endpoint with a service account token (route A), with a model, a voice, a
+language, a style prompt per entry and per request, and speaking rate (pitch rejected). Its voices
+are listed from Google's own list, and listed voices of both Google types now show a gender. No new
+endpoint or error code; its contract
+([tts-rest-api.yaml](../archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml), v0.1.3)
+adds `stylePrompt` to the request and `gender` to listed voices, and supersedes 003's.
+
+Features in progress live under [specs/](../../specs/) until they are archived here.
 
 ## User stories
 
@@ -61,17 +72,23 @@ In progress, not yet archived: `004-gemini-tts-provider` — read [specs/](../..
 | Choose a Google voice by engine, language and short name | P1 | `engine: chirp3-hd`, `language: uk-UA`, `voice: charon` → `uk-UA-Chirp3-HD-Charon`; any part overridable per request; case-insensitive; pre-002 full-name configs unchanged | 002 |
 | Announce with a Google service account | P1 | An entry with only `service-account-key-file` plays exactly as an API-key entry would — same voices, audio and cache; one token reused until near expiry, one fetch for concurrent requests | 003 |
 | A broken Google credential is caught at start-up | P1 | Neither or both of API key and key file, an unreadable or wrong-kind file, a missing identity or unusable private key, or a key file on a non-Google entry — each aborts start-up naming the entry. Start-up never contacts Google | 003 |
+| Announce with a Gemini voice | P1 | A `google-gemini` entry (key file, model, voice, language) plays in the Gemini voice with a bearer token; a repeat is a cache hit; request voice/language overrides are cached separately; a `google-cloud` entry sharing the key file is unaffected | 004 |
+| Steer the delivery with a style prompt | P1 | An entry's default prompt, replaced per request or turned off with `""`, reaches Google separately from the text; each distinct prompt is its own cache entry; an over-long prompt is a 400 | 004 |
+| A wrong Gemini configuration is caught at start-up | P1 | An API key, no key file, no or malformed model/voice/language, `engine`/`pitch`/`extra-params`, an out-of-range rate, an over-long default prompt, or `style-prompt`/`model` on another type — each aborts start-up naming the entry. A Gemini default provider only warns about per-token billing. Start-up never contacts Google | 004 |
 | Announce on a group | P2 | `OUTPUT_GROUP` target plays on every output of the group at once. A group with no outputs is an error | 001 |
 | Serve repeats from cache | P2 | Same text + provider + voice + language (+ format) plays with no provider call; a different provider is a miss; LRU eviction when full; manual clear forces re-synthesis | 001 |
 | A wrong Google voice is caught early | P2 | A voice absent from the catalogue is a 400 `INVALID_VOICE` listing the voices for that engine and language; an unreachable catalogue skips the check | 002 |
 | A rejected Google credential explains itself | P2 | A revoked key or a denied token fails with a 503 carrying Google's explanation, never a secret; an unreachable token service is held off for the back-off; recovery needs no restart | 003 |
+| Gemini refusals explain themselves | P2 | A missing permission, disabled API, unknown model or voice, or an over-long text+prompt fails with the entry's name and Google's explanation, under the same codes as `google-cloud`; token failures behave exactly as in 003 | 004 |
 | Choose the provider | P3 | No provider in the request uses the default; a named one overrides it; an unknown or unreachable one is an error and plays nothing | 001 |
 | Adjust Google pitch and speaking rate | P3 | Configured per entry, overridable per request, sent only when set, part of the cache key; out of range is a 400 (or a start-up fault) | 002 |
 | List a provider's voices | P3 | `GET /api/tts/providers/{name}/voices`, filterable by language and engine, from the same catalogue that validates | 002 |
+| Settings go only to the entry that honours them | P3 | `stylePrompt` to a non-Gemini entry, or `engine`/`pitch` to a Gemini one (request or listing filter), is a 400 naming the field and type; `speakingRate` is accepted by both Google types | 004 |
+| List the Gemini voices | P3 | A `google-gemini` entry lists every Gemini voice in Google's list with the entry's model and a gender, sorted by name; a language filter is form-checked but does not narrow; listing is never used to check an announcement. `google-cloud` listings are unchanged but gain gender | 004 |
 | Queue announcements | P4 | Requests for one busy target play in arrival order; queued ones are discarded at shutdown | 001 |
 
 Sources: [001](../archive/001-tts-extension/spec.md), [002](../archive/002-google-voice-selection/spec.md),
-[003](../archive/003-google-service-account-auth/spec.md).
+[003](../archive/003-google-service-account-auth/spec.md), [004](../archive/004-gemini-tts-provider/spec.md).
 
 ## Requirements
 
@@ -106,7 +123,10 @@ the archived spec behind an ID for its full wording.
   `INVALID_VOICE` (400) and `VOICE_CATALOGUE_UNAVAILABLE` (503) to the same mapping (002/FR-021)
 - **002/FR-009, FR-020** A request may also override `engine`, `pitch` and `speakingRate` — for
   `google-cloud` only. Sending any of them to another provider type is a 400 naming the field and
-  the type, before any synthesis
+  the type, before any synthesis. *Amended by 004*: `speakingRate` is also accepted by
+  `google-gemini`; `engine` and `pitch` stay `google-cloud` only (004/FR-011, FR-022)
+- **004/FR-021** A request may carry `stylePrompt` — for `google-gemini` only. Any `stylePrompt`
+  present (even empty or whitespace) sent to another type is a 400 naming the field and the type
 - **001/FR-027** Structured log events: request received, cache hit/miss, synthesis
   started/completed/error, playback started/completed
 
@@ -114,7 +134,7 @@ the archived spec behind an ID for its full wording.
 
 - **001/FR-003, FR-004, FR-013** Several named providers, cloud and local, each with its own type,
   credentials and settings (voice, language, rate, model/engine). Types: `OPENAI`, `GOOGLE_CLOUD`,
-  `PIPER` (piper1-gpl, `python3 -m piper`), `LOCAL_HTTP`
+  `GOOGLE_GEMINI` (since 004), `PIPER` (piper1-gpl, `python3 -m piper`), `LOCAL_HTTP`
 - **001/FR-005** Default provider: explicit, or the first in the list
 - **001/FR-010, FR-011, FR-021** Clear errors for an unknown target, an unreachable or failing
   provider, and a rate limit — never an automatic retry
@@ -157,7 +177,8 @@ HTTP: their voice, language and `en-US` fallback behave exactly as in 001 (002/F
 - **002/FR-016** Everything uses Google's stable `v1` interface
 - **002/FR-018, FR-019** `GET /api/tts/providers/{name}/voices?language=&engine=` lists short name,
   full name, engine and language from the same catalogue; a non-Google provider is a 400, an
-  unreachable catalogue a 503
+  unreachable catalogue a 503. *Amended by 004*: `google-gemini` lists too, and every listed voice
+  of either Google type also shows Google's published gender (004/FR-036)
 
 ### Google Cloud credentials
 
@@ -174,7 +195,8 @@ synthesizes, how voices resolve or validate, or how audio is cached (003/FR-014)
   the resolved absolute path. Rotating the key needs a restart
 - **003/FR-004** Start-up makes no network request; the first token fetch happens on the first
   synthesis, voice check or listing
-- **003/FR-005** `service-account-key-file` on any other provider type aborts start-up
+- **003/FR-005** `service-account-key-file` on any other provider type aborts start-up. *Amended by
+  004*: `google-gemini` requires it, so only OpenAI, Piper and local HTTP reject it
 - **003/FR-006** API-key entries behave exactly as before, with no edits
 - **003/FR-007, FR-008** A service-account entry sends a bearer token — never an API key — on
   synthesis and the voice catalogue, obtained from the key file's `token_uri` (or Google's standard
@@ -193,6 +215,63 @@ synthesizes, how voices resolve or validate, or how audio is cached (003/FR-014)
   A still-valid token keeps being used. An explicit rejection of the key is never remembered
 - **003/FR-021** The setup guide documents the service-account path; the configuration reference
   lists the setting and its exclusivity with `api-key`
+
+### Google Gemini voices
+
+[Source: .specify/archive/004-gemini-tts-provider] — a separate type, `google-gemini`, not an engine
+of `google-cloud`: a per-request engine override could otherwise switch a free-tier entry to a
+paid model, because Chirp3-HD and Gemini share voice names (`Kore`, `Charon`). `google-cloud`,
+OpenAI, Piper and local HTTP behave exactly as before, and every existing configuration starts
+unedited (004/FR-024).
+
+- **004/FR-001, FR-010** Synthesis goes to Google's Text-to-Speech `v1` `text:synthesize` (route A)
+  with the configured model, the effective voice and language, the effective style prompt (sent
+  separately from the text, only when there is one) and the speaking rate (only when set), asking
+  for the same audio format as `google-cloud`. Pitch is never sent
+- **004/FR-002, FR-003, FR-014** Authentication is **only** a service account key file, read and
+  validated by 003's rules; an `api-key` aborts start-up (Google refuses Gemini with an API key).
+  Every 003 token rule applies unchanged, with a token per entry
+- **004/FR-004, FR-005** `model`, `voice` and `language` are required. Start-up checks form only:
+  the model is one token of lowercase letters, digits, dots and hyphens (not a closed list); the
+  voice one word of ASCII letters; the language 002's language-region rule. Language is required
+  because Google refuses a Gemini request without one
+- **004/FR-006, FR-007, FR-008** A default `style-prompt` and `speaking-rate` are optional (rate on
+  002's range; a prompt over `max-text-length` aborts start-up). `engine`, `pitch` or a non-empty
+  `extra-params` on a Gemini entry, and `style-prompt` (and, by the plan, `model`) on any other
+  type, abort start-up — never accepted and ignored
+- **004/FR-009** Start-up makes no network request
+- **004/FR-029** A `google-gemini` effective default provider (named, or the first enabled entry)
+  logs one warning that unnamed announcements are billed per token; start-up continues
+- **004/FR-030** The synthesis time limit has the shared 10 s default and covers the token too
+- **004/FR-011, FR-012, FR-013** A request may override voice, language, style prompt and speaking
+  rate, never the model. Every prompt is stripped at both ends (case and inner spacing kept); the
+  effective prompt is the request's if non-empty, none if the request's is empty, else the entry's
+  default. A request prompt over `max-text-length`, or a malformed request voice or language, is a
+  400 before synthesis
+- **004/FR-015** An announcement's voice is never checked against a catalogue. It is normalized to
+  a leading capital (`kore` → `Kore`) for Google and for the cache; errors quote the caller's
+  spelling
+- **004/FR-016** The audio plays at the right speed and pitch whatever sample rate Google returns
+  (Gemini's native rate is 24 kHz)
+- **004/FR-019, FR-020** Google's refusals use the same codes as `google-cloud` (`PROVIDER_ERROR`,
+  `PROVIDER_RATE_LIMITED`, `PROVIDER_TIMEOUT`) with the entry's name and Google's explanation; no
+  new error code, every new caller error is `INVALID_REQUEST`
+- **004/FR-025** The Google plumbing both types use — sign-in, the 401 retry, Google's explanation,
+  reading the audio — is one implementation, so a fix reaches both
+- **004/FR-023, FR-031, FR-032** Voice listing answers from Google's published `v1/voices` list,
+  keeping only bare Gemini-form names (normalized, sorted), fetched on first need with the entry's
+  own token and governed by the shared `voice-catalogue` settings, one copy per entry. Each voice
+  shows its name as both short and full name, the entry's model as engine, Google's gender, and
+  **no** language (Google's `en-US` tag does not say what the voice speaks). An unfetchable list
+  is `VOICE_CATALOGUE_UNAVAILABLE`
+- **004/FR-033, FR-034, FR-035** A `language` filter is form-checked but does not narrow; an
+  `engine` filter is a 400 naming the filter and type. Announcing — hit or miss — never fetches
+  the list
+- **004/FR-026, FR-027, FR-028** The setup guide covers the API and role, per-token billing with no
+  free tier, the models, choosing a voice (listed voices are not guaranteed for every model), style
+  prompts, the time limit and the default-provider warning; the configuration reference and REST
+  contract cover the type, `stylePrompt` and Gemini listing; the Gemini planning note moved to
+  `docs/archive/`
 
 ### Playback
 
@@ -214,6 +293,10 @@ synthesizes, how voices resolve or validate, or how audio is cached (003/FR-014)
   spelling doesn't matter), the resolved language, and pitch and speaking rate when they differ from
   Google's defaults. Same audio → one entry; different audio → never shared. Pre-002 entries may
   miss once after the upgrade
+- **004/FR-017, FR-018** For `google-gemini` the key also covers the model, the normalized voice,
+  the language, the speaking rate on 002's terms, and the effective (stripped) style prompt,
+  compared exactly; no prompt and an empty prompt are one identity. Keys of every other type — and
+  of a Gemini request with no prompt — hash exactly as before, so every existing entry stays a hit
 - **001/FR-017, FR-018, FR-019** On disk, survives restarts, LRU at a configurable size, clearable
   on request
 - **001/FR-020** A missing or corrupt entry is a miss and is replaced
@@ -224,25 +307,40 @@ synthesizes, how voices resolve or validate, or how audio is cached (003/FR-014)
 
 [Source: .specify/archive/001-tts-extension/data-model.md,
 .specify/archive/002-google-voice-selection/data-model.md,
-.specify/archive/003-google-service-account-auth/data-model.md]
+.specify/archive/003-google-service-account-auth/data-model.md,
+.specify/archive/004-gemini-tts-provider/data-model.md]
 
-- **Speak request** — text, target name, `TargetType`, optional provider / voice / language, and
-  (Google only) engine / pitch / speaking rate
+- **Speak request** — text, target name, `TargetType`, optional provider / voice / language,
+  (`google-cloud` only) engine / pitch, (both Google types) speaking rate, and (`google-gemini`
+  only, since 004) style prompt
 - **Provider configuration** — name, type, credentials, default voice and language, engine,
-  timeout, and (Google only) pitch and speaking rate; the list plus `default-provider` under
-  `multiroom.tts`. Since 002, `language` has no declared default: the `en-US` fallback lives in the
-  non-Google resolution
+  timeout, and (Google only) pitch and speaking rate; since 004, `model` and `style-prompt`
+  (`google-gemini` only). The list plus `default-provider` under `multiroom.tts`. Since 002,
+  `language` has no declared default: the `en-US` fallback lives in the non-Google resolution
+- **Gemini provider entry** *(004)* — a `google-gemini` entry: name, key file (required, no API
+  key), model, default voice and language (all required), optional default style prompt and
+  speaking rate
+- **Gemini model** *(004)* — e.g. `gemini-2.5-flash-tts`; form-checked, fixed per entry, never
+  case-folded, carried as the settings' `engine` and so as the cache key's engine name
+- **Gemini voice** *(004)* — a bare name such as `Kore`, not tied to a language or engine;
+  normalized to a leading capital; Google publishes a gender for each
+- **Style prompt** *(004)* — a natural-language delivery instruction, stripped, sent separately
+  from the text, part of the cache key when in effect; from the request, the entry's default, or
+  nowhere
 - **Requested / resolved settings** — the request's overrides, and what a provider resolves them to
   before the cache lookup, with no I/O: voice, language, engine, pitch, speaking rate, plus the
   normalized forms the cache key uses. Keeps `TtsService` provider-agnostic
 - **Google voice name** — `Full` (language, engine segment, voice) or `Short` (voice); parsed,
   canonicalized, composed
 - **Google engine** — the six recognized families, each with a canonical spelling and aliases
-- **Voice catalogue** — one per `google-cloud` entry: empty, loaded or failed; TTL, failure
-  back-off, single-flight fetch, lock-free warm lookups. Global timings under
-  `multiroom.tts.voice-catalogue`
+- **Voice catalogue** — one per Google entry: empty, loaded or failed; TTL, failure back-off,
+  single-flight fetch, lock-free warm lookups. Global timings under `multiroom.tts.voice-catalogue`.
+  Since 004 it takes a voice selector — `google-cloud` keeps full names and validates announcements
+  against them; `google-gemini` keeps bare Gemini names (model as engine, no language) and serves
+  listing only. Every catalogue voice carries Google's gender (`null` when absent)
 - **Google credential** — per `google-cloud` entry, exactly one of an API key (`?key=`) or a
-  service account (bearer token). Not part of the cache key beyond the provider name
+  service account (bearer token); per `google-gemini` entry, always a service account. Not part of
+  the cache key beyond the provider name
 - **Service account key** — the key file's `client_email`, PKCS#8 private key, optional
   `private_key_id`, `project_id` and `token_uri`. Read once at start-up; its `toString` prints only
   the email and path
@@ -263,7 +361,8 @@ RECEIVED → VALIDATED            (or REJECTED → 400)
   → RESOLVED    provider.resolveSettings: pure, no I/O          (or REJECTED → 400)
   → CACHE_CHECK → hit:  AUDIO_READY (pinned)                    — no catalogue work at all
                 → miss: [Google service account: token first → or FAILED 503, check skipped]
-                        [Google: catalogue check → INVALID_VOICE 400, or skipped if unreachable]
+                        [google-cloud: catalogue check → INVALID_VOICE 400, or skipped if unreachable]
+                        [google-gemini: no catalogue step at all]
                         SYNTHESIZING (a 401 renews the token and resends once)
                         → CONVERTING → AUDIO_READY                (or FAILED → 503)
                         token, catalogue fetch and synthesis share the entry's timeout
@@ -307,6 +406,17 @@ RECEIVED → VALIDATED            (or REJECTED → 400)
 - *(003)* An organisation policy that forbids key creation: out of scope; only key files are
   supported
 - *(003)* File permissions on the key are the operator's responsibility
+- *(004)* A voice name shared by Chirp3-HD and Gemini (`Kore`) means a Gemini voice only on a
+  `google-gemini` entry; nothing on a `google-cloud` entry can switch to Gemini
+- *(004)* A voice or language the model lacks, a retired preview model, or text plus prompt too long
+  for the model: not checked locally; Google's refusal reaches the caller. A listed voice is not
+  guaranteed for the entry's model, because Google's list names no model
+- *(004)* A new Gemini voice from Google appears in the listing once the remembered list expires,
+  with no release
+- *(004)* Gemini inline markup in the text (`[whispering]`) is sent and cached as ordinary text
+- *(004)* A whitespace-only request prompt is "no prompt"; a YAML block's trailing line break is
+  stripped, so it shares a cache entry with the same prompt written plainly
+- *(004)* A `google-gemini` default provider is allowed, with the start-up billing warning
 
 ## Success criteria
 
@@ -340,6 +450,16 @@ repository boots the host.
 | 003/SC-007 Google's explanation | always passed on for a rejected key or token | Tested (OAuth error shape too) |
 | 003/SC-008 no secrets | none in any log or error during tests or the smoke run | Tested by capturing all output |
 | 003/SC-009 no library | no new third-party dependency | JDK `java.security` only |
+| 004/SC-001 first attempt | a prepared operator hears a Gemini announcement first time | Local-core smoke run (T053) |
+| 004/SC-002 style prompts | three prompts → three audibly different entries; repeats are hits | Cache identity tested; audible difference in T053 |
+| 004/SC-003 upgrade | production starts and announces unedited; pre-upgrade entries still hit | Hash stability tested; confirmed on `multiroom.lan` (T054) |
+| 004/SC-004 malformed config | 100 % of Story 3 cases abort naming extension, entry, fault | Tested |
+| 004/SC-005 start-up | zero network requests for a Gemini entry | Tested |
+| 004/SC-006 hit → playback | < 1 s | No network on a hit by design; checked in T053 |
+| 004/SC-007 Google's explanation | always passed on | Tested |
+| 004/SC-008 no secrets | none in logs or errors | Tested by captured output; core log searched in T053 |
+| 004/SC-009 no library | no new third-party dependency | No dependency added |
+| 004/SC-010 Gemini listing | every published Gemini voice (30 on 2026-09-26) with gender | Tested against a fixture of the live shape |
 
 ## Host coupling
 
@@ -361,3 +481,8 @@ one error code: it added two.
 **Revision 2026-09-25**: archived `003-google-service-account-auth` — service-account stories, a
 "Google Cloud credentials" requirements group, credential/key/token entities, the token step in the
 lifecycle, edge cases and success criteria.
+
+**Revision 2026-09-26**: archived `004-gemini-tts-provider` — Gemini stories, a "Google Gemini
+voices" requirements group, the Gemini cache-key rule, Gemini entities and the catalogue's voice
+selector and gender, the no-catalogue step in the lifecycle, edge cases and success criteria.
+002/FR-009, 002/FR-018 and 003/FR-005 annotated where 004 widened them to `google-gemini`.

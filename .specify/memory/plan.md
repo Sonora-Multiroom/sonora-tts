@@ -3,8 +3,9 @@
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
 [Source: .specify/archive/001-tts-extension/plan.md], `002-google-voice-selection`
-[Source: .specify/archive/002-google-voice-selection/plan.md] and
-`003-google-service-account-auth` [Source: .specify/archive/003-google-service-account-auth/plan.md].
+[Source: .specify/archive/002-google-voice-selection/plan.md],
+`003-google-service-account-auth` [Source: .specify/archive/003-google-service-account-auth/plan.md]
+and `004-gemini-tts-provider` [Source: .specify/archive/004-gemini-tts-provider/plan.md].
 
 ## Shape
 
@@ -26,10 +27,15 @@ src/main/java/multiroom/tts/
 │   │                          #   (first = implicit default), VoiceCatalogueProvider (optional
 │   │                          #   listing capability), Requested/SynthesisSettings,
 │   │                          #   DefaultSettingsResolution (001 rules for non-Google providers)
-│   ├── cloud/                 #   OpenAiTtsProvider, GoogleCloudTtsProvider (orchestrator only)
+│   ├── cloud/                 #   OpenAiTtsProvider, GoogleCloudTtsProvider (orchestrator only),
+│   │   │                      #   GoogleGeminiTtsProvider (004: token → body → client; lists voices)
 │   │   └── google/            #   GoogleEngine, GoogleLanguage, GoogleVoiceName (sealed Full|Short),
-│   │                          #   GoogleVoiceResolver (pure), GoogleVoiceCatalogue (per entry),
-│   │                          #   CatalogueVoice, GoogleErrorBody (API + OAuth error shapes);
+│   │                          #   GoogleVoiceResolver (pure), GoogleVoiceCatalogue (per entry, with
+│   │                          #   a voice selector since 004), CatalogueVoice (+ gender),
+│   │                          #   GoogleErrorBody (API + OAuth error shapes);
+│   │                          #   shared (004): GoogleTtsClient (authorised send, 401 retry, error
+│   │                          #   mapping, audio decode, voice fetch), GoogleSpeakingRate;
+│   │                          #   Gemini (004): GeminiSettingsResolver (pure), GeminiVoice, GeminiModel;
 │   │                          #   credentials: GoogleCredential (sealed ApiKey|ServiceAccount),
 │   │                          #   ServiceAccountKey, ServiceAccountAssertion (RS256 JWT, pure),
 │   │                          #   GoogleTokenExchange, GoogleAccessTokenCache (per entry),
@@ -72,7 +78,7 @@ The manifest, written by the inherited parent POM, carries `Extension-Id: tts`,
 | WireMock (`wiremock-standalone` 3.9.2) | `test` | Cloud provider HTTP; no test calls a real provider |
 | `jacoco-maven-plugin` 0.8.14 | build | Constitution III's 80 % line-coverage floor, enforced by `mvn verify` since 002. 0.8.14 because 0.8.11 cannot read Java 25 class files |
 
-002 and 003 added no dependency. Service-account sign-in uses the JDK's `java.security`
+002, 003 and 004 added no dependency. Service-account sign-in uses the JDK's `java.security`
 (`KeyFactory`, `Signature`) — `google-auth-library` was rejected because shading it would bring
 Guava and its own HTTP transport onto the shared classpath.
 
@@ -83,15 +89,18 @@ Guava and its own HTTP transport onto the shared classpath.
 | Key | Default | Notes |
 |---|---|---|
 | `enabled` | `true` | Read once at context refresh |
-| `providers[]` | empty | `name`, `type` (`OPENAI`, `GOOGLE_CLOUD`, `PIPER`, `LOCAL_HTTP`), credentials, `voice`, `language` (no default since 002), `engine`, `timeout-seconds` (10), `extra-params` |
-| `providers[].pitch`, `.speaking-rate` | not sent | `google-cloud` only: [-20, 20] and [0.25, 2.0]. A start-up fault on any other type |
-| `providers[].service-account-key-file` | none | `google-cloud` only, exclusive with `api-key` (exactly one required). A path, resolved against the working directory. A start-up fault on any other type |
+| `providers[]` | empty | `name`, `type` (`OPENAI`, `GOOGLE_CLOUD`, `GOOGLE_GEMINI`, `PIPER`, `LOCAL_HTTP`), credentials, `voice`, `language` (no default since 002), `engine`, `timeout-seconds` (10), `extra-params` |
+| `providers[].pitch` | not sent | `google-cloud` only: [-20, 20]. A start-up fault on any other type |
+| `providers[].speaking-rate` | not sent | `google-cloud` and `google-gemini` (since 004): [0.25, 2.0]. A start-up fault on any other type |
+| `providers[].service-account-key-file` | none | `google-cloud` (exclusive with `api-key`, exactly one required) and `google-gemini` (required; `api-key` forbidden). A path, resolved against the working directory. A start-up fault on any other type |
+| `providers[].model` | none | `google-gemini` only, required (004): the Gemini-TTS model (`gemini-2.5-flash-tts`), form `[a-z0-9][a-z0-9.-]*`. A start-up fault on any other type |
+| `providers[].style-prompt` | none | `google-gemini` only (004): the default style prompt, stripped, ≤ `max-text-length`. A start-up fault on any other type |
 | `default-provider` | first in the list | |
 | `max-text-length` | 500 | |
 | `cache.dir` | `${user.home}/.multiroom/tts-cache` | `java.nio.file.Path` |
 | `cache.max-size-mb` | 500 | LRU above it |
 | `queue.max-depth-per-target` | 10 | |
-| `voice-catalogue.ttl` | `24h` | Per `google-cloud` entry's own catalogue |
+| `voice-catalogue.ttl` | `24h` | Per Google entry's own catalogue (`google-gemini` too, since 004) |
 | `voice-catalogue.failure-backoff` | `60s` | No refetch after a failure for this long; also the minimum age before a miss refetches. Since 003, also the token service's back-off |
 | `voice-catalogue.fetch-timeout` | `3s` | Cap on one fetch, inside the entry's `timeout-seconds` |
 
@@ -109,6 +118,15 @@ is not PKCS#8 RSA usable for signing, or naming a non-`https`, non-loopback `tok
 surface:
 [003 contracts/configuration.md](../archive/003-google-service-account-auth/contracts/configuration.md).
 
+`google-gemini` entries (004) abort start-up on: an `api-key` (checked first); no key file; a
+missing or malformed `model`, `voice` or `language`; `engine`, `pitch` or a non-empty
+`extra-params`; a rate out of range; a default prompt over `max-text-length` after stripping; and
+every 003 key-file fault. `style-prompt` or `model` on any other type is a fault too. When the
+effective default provider (`default-provider`, else the first **enabled** entry) is
+`google-gemini`, `TtsProperties.validate()` logs one `WARN` about per-token billing and continues.
+Full surface:
+[004 contracts/configuration.md](../archive/004-gemini-tts-provider/contracts/configuration.md).
+
 Start-up validation reads configuration and the filesystem only — never a socket, never a process.
 Piper's `model-path` and its `.onnx.json` sidecar must exist; `python-executable` is a
 `PATH`-resolved command and is not checked. Operator reference:
@@ -124,18 +142,20 @@ with no change to `multiroom-rest`:
 | `POST` | `/api/tts/speak` | `TtsController` — `202` with `cacheHit`, or `{error, message}` with 400/503 |
 | `DELETE` | `/api/tts/cache` | `TtsCacheController` |
 | `GET` | `/api/tts/cache/stats` | `TtsCacheController` |
-| `GET` | `/api/tts/providers/{name}/voices?language=&engine=` | `TtsVoiceController` (002) — 400 for a non-Google provider, 503 `VOICE_CATALOGUE_UNAVAILABLE` |
+| `GET` | `/api/tts/providers/{name}/voices?language=&engine=` | `TtsVoiceController` (002) — 400 for a non-Google provider, 503 `VOICE_CATALOGUE_UNAVAILABLE`. Since 004 also `google-gemini` (an `engine` filter is a 400; `language` is form-checked but does not narrow); every voice carries `gender`, and null fields are omitted |
 
 Since 002, `POST /api/tts/speak` also takes optional `engine`, `pitch` and `speakingRate`, and the
 error enum has nine codes (`INVALID_VOICE` 400, `VOICE_CATALOGUE_UNAVAILABLE` 503 added). 003
 changed no endpoint and added no code: token failures reuse `PROVIDER_ERROR`, `PROVIDER_TIMEOUT`
-and `PROVIDER_RATE_LIMITED`.
+and `PROVIDER_RATE_LIMITED`. 004 added no endpoint and no code: `POST /api/tts/speak` takes an
+optional `stylePrompt` (`google-gemini` only), and listed voices gain `gender`.
 
 Deliberately not under `/api/v2/**` (`multiroom-rest`'s contract with `sonora-cli` and
 `sonora-mcp`), and deliberately not RFC 7807 for the same reason. Current contract, versioned with
 the JAR:
-[.specify/archive/003-google-service-account-auth/contracts/tts-rest-api.yaml](../archive/003-google-service-account-auth/contracts/tts-rest-api.yaml)
-(v0.1.2 — 002's v0.1.1 plus a changelog entry; 002's superseded 001's).
+[.specify/archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml](../archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml)
+(v0.1.3 — adds `stylePrompt` and `gender`; supersedes 003's v0.1.2, which was 002's v0.1.1 plus a
+changelog entry; 002's superseded 001's).
 
 ## Architecture decisions
 
@@ -226,6 +246,45 @@ the JAR:
   (settled by the smoke run with a real key). Service Usage Consumer is the fix for a 403 naming
   `serviceusage.services.use`, when the account lives in another project
 
+[Source: .specify/archive/004-gemini-tts-provider/plan.md, research.md]
+
+- **A separate type, not a `google-cloud` engine**: 002's voice composition and catalogue check do
+  not fit bare Gemini voices, and a per-request engine override could silently switch a free-tier
+  entry to a paid model through a shared voice name (`Kore`)
+- **Route A**: Text-to-Speech `v1` `text:synthesize` with a bearer token; body
+  `{input:{text, prompt?}, voice:{languageCode, name, modelName}, audioConfig:{LINEAR16,
+  sampleRateHertz, speakingRate?}}`. Agent Platform `generateContent` with a bound API key was
+  rejected
+- **Shared plumbing extracted, not inherited**: `GoogleTtsClient` owns the `HttpClient`, the
+  credential, the authorised send with the single 401 renew-and-resend, status → error code with
+  Google's explanation, `audioContent` decoding and the `v1/voices` fetch. A subclass would have
+  dragged `google-cloud`'s catalogue check into Gemini. `GoogleCloudTtsProviderTest` passed
+  **unmodified** as the extraction's regression gate
+- **The model rides in `SynthesisSettings.engine`** (OpenAI's precedent), so `TtsService` copies it
+  into `CacheKey.engineName` as for any engine. `CacheKey` appends `|s=<prompt>` only when a prompt
+  is in effect, after `|p=`/`|r=` — every pre-004 key, and every unprompted Gemini key, hashes as
+  before
+- **Prompts are resolved in the provider's pure resolver**: `GeminiSettingsResolver` strips
+  (`String.strip()`), picks request / none / default, and checks the length against
+  `max-text-length` (given at construction), so `TtsService` still knows nothing about prompts.
+  `GoogleVoiceResolver` and `DefaultSettingsResolution` reject a request `stylePrompt`
+- **Gemini voice canonical form**: `[A-Za-z]+`, first letter upper, rest lower in `Locale.ROOT`;
+  letters only keeps the mapping locale-independent. The canonical name is the key, not folded
+  further
+- **Speaking-rate rules shared**: range, NaN rejection and "1.0 is left out of the key" moved from
+  `GoogleVoiceResolver` into `GoogleSpeakingRate`; the pitch constants stay in the resolver
+- **`model` is rejected on non-Gemini types** — beyond the spec, which asks it only for
+  `style-prompt`, following never-accept-and-ignore
+- **The source sample rate comes from the WAV header**, never the request: Gemini returns 24 kHz
+  and `FormatConverter` resamples to native, with no special case
+- **One catalogue, two selectors**: `GoogleVoiceCatalogue` takes a selector from one `voices[]`
+  element to an optional `CatalogueVoice`. The default keeps full names (`google-cloud`
+  unchanged); the Gemini selector keeps `GeminiVoice`-form names with the model as engine and no
+  language, sorted null-safe on language. The Gemini catalogue is per entry, uses the entry's own
+  token, and synthesis never consults it — the list names no model
+- **The cost warning lives in `TtsProperties.validate()`**, reproducing `ProviderRegistry`'s
+  default rule, because validation runs once, before the registry exists
+
 ## Testing strategy
 
 Unit and slice tests only; nothing boots the host.
@@ -246,6 +305,10 @@ Unit and slice tests only; nothing boots the host.
   material is committed — and point `token_uri` at WireMock on loopback, so one server plays both
   Google's token endpoint and the API. A test captures every log line and exception message across
   the token failures and asserts that no private key, assertion or token appears
+- Gemini (004): WireMock plays the token endpoint, `text:synthesize` and `v1/voices` (a fixture
+  mixing full names and bare Gemini names in the live 2026-09-26 shape); a 24 kHz WAV fixture must
+  reach `FormatConverter` as a 24 kHz source; `CacheKeyTest` pins pre-004 hashes; a captured-log
+  test covers Gemini secrets; the value types and resolver are tested without HTTP
 - JaCoCo's 80 % floor fails `mvn verify`
 
 ## Build, deploy, verify
@@ -272,7 +335,9 @@ core proves the JAR loads.
 4. **No end-to-end test.** Nothing here boots the host, so 001's performance criteria (SC-001,
    SC-002, SC-006, SC-007) are measured against a deployed core and on the Pi, not in CI that does
    not exist. **Open at archival**: 001's tasks T028a, T032a, T041a and T058 — the timings and the
-   Pi end-to-end run — are unchecked
+   Pi end-to-end run — are unchecked. 004's live runs, by contrast, are done: T053 (the local-core
+   smoke run with a real key) and T054 (the production Pi check of the 24 kHz Gemini path and the
+   unedited classic entry)
 
 ---
 
@@ -291,3 +356,9 @@ tree; `service-account-key-file` and the credential start-up faults; the current
 003's v0.1.2; service-account design decisions (credential strategy, JDK-only JWT exchange, where
 the key file is read, token cache, failure classes, token-first order, 401-only retry, secrets,
 roles); service-account testing notes.
+
+**Revision 2026-09-26**: archived `004-gemini-tts-provider` — `GoogleGeminiTtsProvider`,
+`GoogleTtsClient`, `GoogleSpeakingRate` and the Gemini value types in the tree; `model`,
+`style-prompt`, the widened `speaking-rate` and key-file rows, Gemini start-up faults and the cost
+warning; `stylePrompt`, `gender` and Gemini listing on the HTTP surface; the current contract moved
+to 004's v0.1.3; Gemini design decisions and testing notes; T053/T054 recorded as verified.

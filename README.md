@@ -29,15 +29,15 @@ ordinary dependency injection. It runs no web server of its own and ships no cop
   a per-entry and per-request **style prompt** to steer delivery. Service-account authentication
   only; billed per token with no free tier, so it's never a default an operator falls into by
   accident
-- Disk cache keyed by text + provider/model + voice/language + audio format, surviving restarts,
-  LRU-evicted at a configurable size
+- Disk cache keyed by text + provider/model + voice/language (+ style prompt, when one is in
+  effect) + audio format, surviving restarts, LRU-evicted at a configurable size
 - Playback through an ephemeral registered input; the target's prior state is restored when the
   host destroys the announcement's route
 
-Status: **implemented, `mvn verify` green**, at version 0.1.3 with features 001 to 004. See
-[.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) for the base spec and
-[tasks.md](.specify/archive/001-tts-extension/tasks.md) for what's verified versus what still needs real audio
-hardware.
+Status: **implemented, `mvn verify` green**, at version 0.1.3 with features 001 to 004. See the
+master [spec](.specify/memory/spec.md) for what it does today, [plan](.specify/memory/plan.md) for
+how it is built, and [changelog](.specify/memory/changelog.md) for each feature and its open tasks
+(001's timings and Pi end-to-end run still need real audio hardware).
 
 ## Requirements
 
@@ -90,8 +90,9 @@ examples for every provider type, and how to trigger an announcement and manage 
 | [docs/google-cloud-tts-setup.md](docs/google-cloud-tts-setup.md) | Setting up Google Cloud: billing, the API, an API key or a service account key, and Gemini voices (`google-gemini`) |
 | [AGENTS.md](AGENTS.md) | How to work in this repository, and the rules across the repo boundary |
 | [.specify/memory/constitution.md](.specify/memory/constitution.md) | Engineering principles, the merge gate, the extension boundary |
+| [.specify/memory/spec.md](.specify/memory/spec.md), [plan.md](.specify/memory/plan.md), [changelog.md](.specify/memory/changelog.md) | Master spec and plan, merged from every archived feature, and the feature log |
 | [.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) | The feature: spec, plan, tasks, contracts |
 | [.specify/archive/002-google-voice-selection/](.specify/archive/002-google-voice-selection/) | Google Cloud voice selection |
 | [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) | Google Cloud service account authentication |
-| [specs/004-gemini-tts-provider/](specs/004-gemini-tts-provider/) | Gemini TTS provider (`google-gemini`); its REST contract (v0.1.3) is the current one |
+| [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) | Gemini TTS provider (`google-gemini`); its REST contract (v0.1.3) is the current one |
 | [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |

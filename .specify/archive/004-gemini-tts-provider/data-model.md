@@ -130,7 +130,7 @@ gain `gender`.
 
 Unchanged from 003: `GoogleAccessTokenCache`, one per entry, with the states empty → valid →
 renewing → valid, and back-off after an *unavailable* failure. Its state machine is in
-[003's data model](../../.specify/archive/003-google-service-account-auth/data-model.md).
+[003's data model](../003-google-service-account-auth/data-model.md).
 
 ## Start-up output
 

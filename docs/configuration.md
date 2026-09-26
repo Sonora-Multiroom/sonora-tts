@@ -453,7 +453,7 @@ Response (`202 Accepted`):
 ```
 
 Errors use a flat `{ "error": "<CODE>", "message": "…" }` shape — see
-[contracts/tts-rest-api.yaml](../.specify/archive/003-google-service-account-auth/contracts/tts-rest-api.yaml) for the
+[contracts/tts-rest-api.yaml](../.specify/archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml) for the
 full code list and their HTTP statuses.
 
 ## Managing the cache
@@ -469,5 +469,5 @@ GET    /api/tts/cache/stats                 # entry count, size, per-provider br
 - [google-cloud-tts-setup.md](google-cloud-tts-setup.md) — obtaining a Google Cloud API key or service account key
 - [.specify/archive/001-tts-extension/quickstart.md](../.specify/archive/001-tts-extension/quickstart.md) — build, deploy
   and end-to-end walkthrough, including installing Piper
-- [.specify/archive/003-google-service-account-auth/contracts/tts-rest-api.yaml](../.specify/archive/003-google-service-account-auth/contracts/tts-rest-api.yaml) —
-  the full OpenAPI contract (v0.1.2, which supersedes 002's v0.1.1 and 001's)
+- [.specify/archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml](../.specify/archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml) —
+  the full OpenAPI contract (v0.1.3, which supersedes 003's v0.1.2 and every earlier one)

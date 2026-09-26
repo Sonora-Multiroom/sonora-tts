@@ -4,6 +4,39 @@
 
 Newest first.
 
+### 004 Gemini TTS Provider — 2026-09-26 (archived 2026-09-26)
+
+**Branch:** `004-gemini-tts-provider`
+**Spec:** .specify/archive/004-gemini-tts-provider
+**Release:** `multiroom-tts` 0.1.3, still requires `multiroom-api` 0.1.18 (no upstream change)
+**Commit:** `d7bf31f`
+
+**What was added:**
+
+- A `google-gemini` provider type: Gemini-TTS through Google's Text-to-Speech `v1` endpoint with a
+  service account token (route A), with a required model, voice and language per entry
+- A style prompt per entry (`style-prompt`) and per request (`stylePrompt`, `""` turns the default
+  off), stripped, sent separately from the text, and part of the cache key only when in effect —
+  every existing cache entry stays a hit
+- Speaking rate on 002's rules; pitch, `engine`, `extra-params` and an API key rejected at start-up;
+  a warning when a Gemini entry is the default provider, since it has no free tier
+- Voice listing for `google-gemini` from Google's own voice list (model as engine, no language,
+  never used to check an announcement); listed voices of both Google types now show gender
+- Setup guide, configuration reference, README and REST contract v0.1.3 updated; the Gemini planning
+  note moved to `docs/archive/`
+
+**New Components:**
+
+- `GoogleGeminiTtsProvider`; in `provider.cloud.google`: `GoogleTtsClient` (shared Google
+  plumbing extracted from `GoogleCloudTtsProvider`), `GeminiSettingsResolver`, `GeminiVoice`,
+  `GeminiModel`, `GoogleSpeakingRate`
+- `ProviderType.GOOGLE_GEMINI`; `model` and `stylePrompt` on `TtsProviderConfig`; `stylePrompt` on
+  `SpeakRequest`, `AnnounceCommand`, `RequestedSettings`, `SynthesisSettings` and `CacheKey`
+- A voice selector on `GoogleVoiceCatalogue`; `gender` on `CatalogueVoice` and `VoiceDescriptor`
+
+**Tasks Completed:** 67/67 tasks — including T053 (local-core smoke run with a real key, merge gate
+part 2) and T054 (production Pi check of the Gemini 24 kHz path and the unedited classic entry)
+
 ### 003 Google Cloud Service Account Authentication — 2026-09-25 (archived 2026-09-25)
 
 **Branch:** `003-google-service-account-auth`
