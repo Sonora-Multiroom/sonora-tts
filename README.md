@@ -17,18 +17,24 @@ contributes into the host's Spring context by auto-configuration, and obtains co
 ordinary dependency injection. It runs no web server of its own and ships no copy of Spring.
 
 - Multiple named providers (cloud or local), one of them the default; a request may override the
-  provider, voice and language, and for Google Cloud also the engine, pitch and speaking rate
+  provider, voice and language; for Google Cloud also the engine, pitch and speaking rate; and for
+  Google Gemini also the speaking rate and a `stylePrompt`, which only `google-gemini` accepts
 - Google Cloud voices by full name (`uk-UA-Chirp3-HD-Charon`) or by engine + language + short
   name (`charon`), checked against Google's published voice list, which
-  `GET /api/tts/providers/{name}/voices` also exposes
+  `GET /api/tts/providers/{name}/voices` also exposes; for a `google-gemini` entry it lists the
+  Gemini voices with their gender
 - Google Cloud authentication by API key or by a service account's JSON key, exchanged for
   short-lived access tokens with no Google library bundled
+- Google Gemini voices (`Kore`, `Charon`, …) through a separate `google-gemini` provider type, with
+  a per-entry and per-request **style prompt** to steer delivery. Service-account authentication
+  only; billed per token with no free tier, so it's never a default an operator falls into by
+  accident
 - Disk cache keyed by text + provider/model + voice/language + audio format, surviving restarts,
   LRU-evicted at a configurable size
 - Playback through an ephemeral registered input; the target's prior state is restored when the
   host destroys the announcement's route
 
-Status: **implemented, `mvn verify` green**, at version 0.1.2 with features 001 to 003. See
+Status: **implemented, `mvn verify` green**, at version 0.1.3 with features 001 to 004. See
 [.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) for the base spec and
 [tasks.md](.specify/archive/001-tts-extension/tasks.md) for what's verified versus what still needs real audio
 hardware.
@@ -81,10 +87,11 @@ examples for every provider type, and how to trigger an announcement and manage 
 | Document | What it covers |
 |---|---|
 | [docs/configuration.md](docs/configuration.md) | How to configure providers, cache and queue; triggering announcements |
-| [docs/google-cloud-tts-setup.md](docs/google-cloud-tts-setup.md) | Setting up Google Cloud: billing, the API, an API key or a service account key |
+| [docs/google-cloud-tts-setup.md](docs/google-cloud-tts-setup.md) | Setting up Google Cloud: billing, the API, an API key or a service account key, and Gemini voices (`google-gemini`) |
 | [AGENTS.md](AGENTS.md) | How to work in this repository, and the rules across the repo boundary |
 | [.specify/memory/constitution.md](.specify/memory/constitution.md) | Engineering principles, the merge gate, the extension boundary |
 | [.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) | The feature: spec, plan, tasks, contracts |
 | [.specify/archive/002-google-voice-selection/](.specify/archive/002-google-voice-selection/) | Google Cloud voice selection |
-| [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) | Google Cloud service account authentication; its REST contract (v0.1.2) is the current one |
+| [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) | Google Cloud service account authentication |
+| [specs/004-gemini-tts-provider/](specs/004-gemini-tts-provider/) | Gemini TTS provider (`google-gemini`); its REST contract (v0.1.3) is the current one |
 | [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |

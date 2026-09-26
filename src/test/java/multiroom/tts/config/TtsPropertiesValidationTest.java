@@ -518,4 +518,314 @@ class TtsPropertiesValidationTest {
                     .hasMessageContaining(provider.getType().name());
         }
     }
+
+    // --- 004: google-gemini entries ------------------------------------------------------------
+
+    private static TtsProviderConfig gemini(String model, String voice, String language) {
+        TtsProviderConfig config = new TtsProviderConfig();
+        config.setName("gemini");
+        config.setType(ProviderType.GOOGLE_GEMINI);
+        config.setServiceAccountKeyFile("sa.json");
+        config.setModel(model);
+        config.setVoice(voice);
+        config.setLanguage(language);
+        return config;
+    }
+
+    @Test
+    void aMinimalValidGeminiEntryValidates() {
+        propertiesWith(gemini("gemini-2.5-flash-tts", "Kore", "en-US")).validate();
+    }
+
+    @Test
+    void aGeminiEntryWithSpeakingRateValidatesWithoutTrippingTheGoogleCloudOnlyRule() {
+        TtsProviderConfig gemini = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        gemini.setSpeakingRate(1.2);
+
+        propertiesWith(gemini).validate();
+    }
+
+    @Test
+    void aGeminiEntryWithServiceAccountKeyFileValidatesWithoutTrippingTheGoogleCloudOnlyRule() {
+        // service-account-key-file is set by gemini() itself; this asserts the entry starts,
+        // proving the non-google-cloud guard no longer rejects it for google-gemini.
+        propertiesWith(gemini("gemini-2.5-flash-tts", "Kore", "en-US")).validate();
+    }
+
+    @Test
+    void aStylePromptWhoseStrippedLengthIsAtMostMaxTextLengthValidates() {
+        TtsProperties properties = propertiesWith(gemini("gemini-2.5-flash-tts", "Kore", "en-US"));
+        // Surrounding whitespace pushes the raw value over the limit, but the stripped length fits.
+        properties.getProviders().get(0).setStylePrompt(" " + "x".repeat(properties.getMaxTextLength()) + " ");
+
+        properties.validate();
+    }
+
+    @Test
+    void aStylePromptLongerThanMaxTextLengthAfterStrippingAbortsStartUp() {
+        TtsProperties properties = propertiesWith(gemini("gemini-2.5-flash-tts", "Kore", "en-US"));
+        properties.getProviders().get(0).setStylePrompt("x".repeat(properties.getMaxTextLength() + 1));
+
+        assertThatThrownBy(properties::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining(String.valueOf(properties.getMaxTextLength() + 1))
+                .hasMessageContaining(String.valueOf(properties.getMaxTextLength()));
+    }
+
+    // --- 004: google-gemini start-up faults ----------------------------------------------------
+
+    @Test
+    void anApiKeyWithAKeyFileAbortsStartUpBeforeTheMissingKeyFileCheck() {
+        TtsProviderConfig config = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        config.setApiKey("test-key");
+
+        assertThatThrownBy(() -> propertiesWith(config).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("service account key file")
+                .hasMessageContaining("cannot use an API key");
+    }
+
+    @Test
+    void anApiKeyAloneAbortsStartUp() {
+        TtsProviderConfig config = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        config.setApiKey("test-key");
+        config.setServiceAccountKeyFile(null);
+
+        assertThatThrownBy(() -> propertiesWith(config).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("service account key file")
+                .hasMessageContaining("cannot use an API key");
+    }
+
+    @Test
+    void noKeyFileAbortsStartUp() {
+        TtsProviderConfig config = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        config.setServiceAccountKeyFile(null);
+
+        assertThatThrownBy(() -> propertiesWith(config).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("service-account-key-file");
+    }
+
+    @Test
+    void aMissingModelAbortsStartUpNamingTheSetting() {
+        assertThatThrownBy(() -> propertiesWith(gemini(null, "Kore", "en-US")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("model");
+    }
+
+    @Test
+    void aMissingVoiceAbortsStartUpNamingTheSetting() {
+        assertThatThrownBy(() -> propertiesWith(gemini("gemini-2.5-flash-tts", null, "en-US")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("voice");
+    }
+
+    @Test
+    void aMissingLanguageAbortsStartUpNamingTheSetting() {
+        assertThatThrownBy(() -> propertiesWith(gemini("gemini-2.5-flash-tts", "Kore", null)).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("language");
+    }
+
+    @Test
+    void aMalformedModelAbortsStartUpNamingTheKeyAndValue() {
+        assertThatThrownBy(() -> propertiesWith(gemini("Gemini-2.5", "Kore", "en-US")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("model")
+                .hasMessageContaining("Gemini-2.5");
+    }
+
+    @Test
+    void aMalformedVoiceAbortsStartUpNamingTheKeyAndValue() {
+        assertThatThrownBy(() -> propertiesWith(gemini("gemini-2.5-flash-tts", "en-US-Kore", "en-US")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("voice")
+                .hasMessageContaining("en-US-Kore");
+    }
+
+    @Test
+    void aMalformedLanguageAbortsStartUpNamingTheKeyAndValue() {
+        assertThatThrownBy(() -> propertiesWith(gemini("gemini-2.5-flash-tts", "Kore", "english")).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("language")
+                .hasMessageContaining("english");
+    }
+
+    @Test
+    void anEngineOnAGeminiEntryAbortsStartUpNamingTheKey() {
+        TtsProviderConfig config = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        config.setEngine("chirp3-hd");
+
+        assertThatThrownBy(() -> propertiesWith(config).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("engine");
+    }
+
+    @Test
+    void aPitchOnAGeminiEntryAbortsStartUpNamingTheKey() {
+        TtsProviderConfig config = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        config.setPitch(2.0);
+
+        assertThatThrownBy(() -> propertiesWith(config).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("pitch");
+    }
+
+    @Test
+    void nonEmptyExtraParamsOnAGeminiEntryAbortsStartUpNamingTheKey() {
+        TtsProviderConfig config = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        config.getExtraParams().put("foo", "bar");
+
+        assertThatThrownBy(() -> propertiesWith(config).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("extra-params");
+    }
+
+    @Test
+    void aGeminiSpeakingRateOutOfRangeAbortsStartUp() {
+        TtsProviderConfig config = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        config.setSpeakingRate(2.5);
+
+        assertThatThrownBy(() -> propertiesWith(config).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("2.5")
+                .hasMessageContaining("[0.25, 2.0]");
+    }
+
+    @Test
+    void aNaNGeminiSpeakingRateAbortsStartUp() {
+        TtsProviderConfig config = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        config.setSpeakingRate(Double.NaN);
+
+        assertThatThrownBy(() -> propertiesWith(config).validate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                .hasMessageContaining("speaking-rate NaN")
+                .hasMessageContaining("[0.25, 2.0]");
+    }
+
+    @Test
+    void aStylePromptOnGoogleCloudOpenAiOrLocalHttpAbortsStartUp() {
+        TtsProviderConfig googleCloud = google(null, "en-US", "en-US-Neural2-C");
+        googleCloud.setStylePrompt("hi");
+
+        TtsProviderConfig openai = new TtsProviderConfig();
+        openai.setName("openai");
+        openai.setType(ProviderType.OPENAI);
+        openai.setApiKey("sk-test");
+        openai.setStylePrompt("hi");
+
+        TtsProviderConfig localHttp = new TtsProviderConfig();
+        localHttp.setName("local");
+        localHttp.setType(ProviderType.LOCAL_HTTP);
+        localHttp.setEndpoint("http://127.0.0.1:5002/api/tts");
+        localHttp.setStylePrompt("hi");
+
+        for (TtsProviderConfig provider : List.of(googleCloud, openai, localHttp)) {
+            assertThatThrownBy(() -> propertiesWith(provider).validate())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageStartingWith("multiroom-tts: provider '" + provider.getName() + "'")
+                    .hasMessageContaining("style-prompt")
+                    .hasMessageContaining("google-gemini");
+        }
+    }
+
+    @Test
+    void aModelOnGoogleCloudOrOpenAiAbortsStartUp() {
+        TtsProviderConfig googleCloud = google(null, "en-US", "en-US-Neural2-C");
+        googleCloud.setModel("gemini-2.5-flash-tts");
+
+        TtsProviderConfig openai = new TtsProviderConfig();
+        openai.setName("openai");
+        openai.setType(ProviderType.OPENAI);
+        openai.setApiKey("sk-test");
+        openai.setModel("gemini-2.5-flash-tts");
+
+        for (TtsProviderConfig provider : List.of(googleCloud, openai)) {
+            assertThatThrownBy(() -> propertiesWith(provider).validate())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageStartingWith("multiroom-tts: provider '" + provider.getName() + "'")
+                    .hasMessageContaining("model")
+                    .hasMessageContaining("google-gemini");
+        }
+    }
+
+    @Test
+    void productionsExactGoogleCloudEntryStillValidatesBesideTheGeminiRules() {
+        TtsProviderConfig google = google(null, "en-US", "en-US-Neural2-C");
+        google.setTimeoutSeconds(10);
+
+        propertiesWith(google).validate();
+    }
+
+    // --- 004: the default-provider cost warning ------------------------------------------------
+
+    private java.util.List<String> captureWarnings(Runnable action) {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("multiroom.tts");
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs =
+                new ch.qos.logback.core.read.ListAppender<>();
+        logs.start();
+        logger.addAppender(logs);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(logs);
+        }
+        return logs.list.stream()
+                .filter(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN)
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.contains("billed per token"))
+                .toList();
+    }
+
+    @Test
+    void anExplicitGeminiDefaultProviderWarnsExactlyOnce() {
+        TtsProperties properties = propertiesWith(gemini("gemini-2.5-flash-tts", "Kore", "en-US"));
+        properties.setDefaultProvider("gemini");
+
+        java.util.List<String> warnings = captureWarnings(properties::validate);
+
+        assertThat(warnings).hasSize(1);
+        assertThat(warnings.get(0)).contains("gemini").contains("billed per token");
+    }
+
+    @Test
+    void theFirstEnabledEntryBeingGeminiWithNoNamedDefaultWarns() {
+        TtsProviderConfig disabledClassic = google(null, "en-US", "en-US-Neural2-C");
+        disabledClassic.setName("google");
+        disabledClassic.setEnabled(false);
+        TtsProviderConfig geminiEntry = gemini("gemini-2.5-flash-tts", "Kore", "en-US");
+        TtsProperties properties = propertiesWith(disabledClassic, geminiEntry);
+
+        java.util.List<String> warnings = captureWarnings(properties::validate);
+
+        assertThat(warnings).hasSize(1);
+        assertThat(warnings.get(0)).contains("gemini");
+    }
+
+    @Test
+    void noWarningWhenTheEffectiveDefaultIsNotGemini() {
+        TtsProperties properties = propertiesWith(google(null, "en-US", "en-US-Neural2-C"),
+                gemini("gemini-2.5-flash-tts", "Kore", "en-US"));
+
+        java.util.List<String> warnings = captureWarnings(properties::validate);
+
+        assertThat(warnings).isEmpty();
+    }
 }

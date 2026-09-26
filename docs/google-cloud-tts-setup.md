@@ -137,16 +137,8 @@ today. The third does not:**
   highest-quality, most natural-sounding option; its own free tier (first 1 million
   characters/month, same allowance as WaveNet — see [above](#2-enable-billing)).
 - **Gemini-TTS models** (for example `gemini-2.5-flash-tts` or `gemini-3.1-flash-tts-preview`,
-  token-priced, **no free tier**). Google accepts them on the same `v1/text:synthesize` endpoint
-  (`voice.modelName`), but **not with an API key**: tested on 2026-09-24, a plain key gets
-  `403 IAM_PERMISSION_DENIED` (`aiplatform.endpoints.predict`) and a key bound to a service
-  account gets `401`. Only OAuth works there: a [service account key](#option-b-a-service-account-key)
-  now provides that credential, but the extension does not send `voice.modelName` yet. They can
-  also be reached with a bound API key through Agent Platform's own `generateContent` endpoint.
-  That needs the Agent Platform API enabled, a service account with the **Agent Platform User**
-  role, and a different request and response format. `GoogleCloudTtsProvider` supports neither
-  path, and Gemini support is planned as a later feature. See
-  [future/google-cloud-gemini-tts-params.md](future/google-cloud-gemini-tts-params.md).
+  token-priced, **no free tier**). Reached through a separate provider type, `google-gemini` — see
+  [Gemini voices](#gemini-voices-google-gemini) below.
 
 Within Legacy + Latest (what this extension can actually use): `Chirp3-HD` and `Neural2` sound
 most natural; `Standard`/`WaveNet` are cheaper; `Studio` is the most expensive.
@@ -175,8 +167,8 @@ Or ask the extension, which lists exactly the voices an entry accepts:
 GET /api/tts/providers/google/voices?language=uk-UA&engine=chirp3-hd
 ```
 
-Each result gives the `shortName` to use with an engine and a language, and the `fullName` to use
-on its own.
+Each result gives the `shortName` to use with an engine and a language, the `fullName` to use
+on its own, and the voice's `gender`.
 
 **The language comes from the voice.** Google rejects a request whose `languageCode` differs from
 the voice's own language, so the extension takes the language from a full voice name:
@@ -186,6 +178,129 @@ that contradicts the voice is a `400 INVALID_REQUEST` before anything is sent. A
 `language` setting, or else the language of its configured full voice). When Google does reject a
 request, its own explanation follows the status, e.g.
 `Provider 'google' returned HTTP 400: Requested language code 'en-US' doesn't match …`.
+
+## Gemini voices (`google-gemini`)
+
+Gemini-TTS voices (`Kore`, `Charon`, …) are a **separate provider type**, `google-gemini`, not an
+engine of `google-cloud`. They synthesize through Google's Text-to-Speech `v1` `text:synthesize`
+endpoint, the same one `google-cloud` uses, but only from a caller authenticated as a **service
+account** — an API key never works for them.
+
+### Set-up, beyond the classic-voice steps above
+
+1. Everything through [step 3](#3-enable-the-api) (project, billing, the Text-to-Speech API) is
+   shared with classic voices.
+2. Also enable the **Agent Platform API** (`aiplatform.googleapis.com`, formerly Vertex AI API):
+   search bar → "Agent Platform API" → **Enable**.
+3. Create a service account key exactly as in [Option B](#option-b-a-service-account-key), and
+   additionally grant it the **Agent Platform User** role
+   (`roles/aiplatform.user`): ☰ → **IAM & Admin** → **IAM** → **Grant access** → paste the service
+   account's email → select **Agent Platform User**.
+
+Without either of these, Gemini synthesis fails with one of:
+
+- `Provider '<name>' returned HTTP 403: Agent Platform API has not been used in project … or it is disabled` —
+  step 2 above.
+- `Provider '<name>' returned HTTP 403: Permission 'aiplatform.endpoints.predict' denied on resource '…'` —
+  step 3 above.
+
+### Cost
+
+**There is no free tier.** Gemini-TTS is billed per token (input text plus audio output tokens),
+unlike the character-based free allowances the classic voices get (see
+[Enable billing](#2-enable-billing)). It is never chosen for an operator automatically; an entry
+configures it deliberately. If a `google-gemini` entry is the **default provider** (named, or the
+first enabled entry with none named), start-up logs a warning, because every announcement without a
+`providerName` is then billed per token:
+
+```text
+multiroom-tts: provider '<name>' (google-gemini) is the default provider; every announcement
+without a providerName is synthesized by Gemini and billed per token
+```
+
+### Models
+
+Known on 2026-09-24 (Google adds and retires models without notice; only the form of the name is
+checked, never against this list):
+
+| Model | Stage |
+|---|---|
+| `gemini-2.5-flash-tts` | GA |
+| `gemini-2.5-pro-tts` | GA |
+| `gemini-2.5-flash-lite-preview-tts` | Preview |
+| `gemini-3.1-flash-tts-preview` | Preview |
+
+### Choosing a voice
+
+A Gemini voice is a name such as `Kore`, `Charon` or `Zubenelgenubi` — one word of letters, any
+case (`kore` and `KORE` both mean `Kore`, and share one cache entry). To see them, ask the entry:
+
+```http
+GET /api/tts/providers/gemini/voices
+```
+
+```json
+{ "providerName": "gemini", "voices": [
+  { "shortName": "Achernar", "fullName": "Achernar", "engine": "gemini-2.5-flash-tts", "gender": "FEMALE" },
+  { "shortName": "Achird",   "fullName": "Achird",   "engine": "gemini-2.5-flash-tts", "gender": "MALE" }
+] }
+```
+
+- The list is Google's own (the bare-named voices of `GET v1/voices`, 30 on 2026-09-26), fetched on
+  first need and remembered under the same `voice-catalogue` settings as a `google-cloud` entry's.
+  Reading it is not billed.
+- `engine` is the entry's model, and there is no `language`: Gemini voices are not tied to one.
+  A `language` filter is checked for form but does not narrow the list; an `engine` filter is a
+  `400`.
+- Google's list is **not per model**, so a listed voice is not guaranteed for every model.
+- Unlike classic voices, an announcement's voice is **not checked** against the list: Google's own
+  rejection of an unknown voice reaches the caller with its explanation.
+
+### Writing a style prompt
+
+The style prompt (`style-prompt` on the entry, `stylePrompt` per request) is a natural-language
+instruction for how the text is delivered, for example `Say this calmly and warmly, like a
+friendly household announcement.` It is sent to Google separately from the text — never
+concatenated with it — and is part of the cache identity, so the same text with a different prompt
+is a fresh synthesis. Per request:
+
+- Omit `stylePrompt` to use the entry's default, if it has one.
+- Send `stylePrompt: ""` (or only whitespace) to turn the default off for that announcement.
+- Any other value replaces the default for that announcement.
+
+Leading and trailing whitespace is stripped from every prompt before it is sent or cached; the rest
+is kept exactly, including case and inner spacing.
+
+### Speaking rate, and what does not work
+
+`speaking-rate` (config) / `speakingRate` (request) works exactly as for `google-cloud`: [0.25, 2.0],
+1.0 is natural speed. **Pitch does not**: Google silently ignores it for Gemini voices, so the
+extension rejects `pitch` rather than accept a setting that would have no effect. `engine` is
+`google-cloud` only and is rejected on a `google-gemini` entry too.
+
+### Raising the time limit
+
+Gemini synthesizes more slowly than classic voices. The shared default (`timeout-seconds: 10`,
+covering the token fetch and the synthesis together) is enough for short announcements; raise it on
+the entry for a slower model or longer texts.
+
+### Example entry
+
+```yaml
+multiroom:
+  tts:
+    providers:
+      - name: gemini
+        type: google-gemini
+        service-account-key-file: /home/tiger/.config/multiroom/sonora-tts-sa.json
+        model: gemini-2.5-flash-tts
+        voice: Kore
+        language: en-US
+        style-prompt: "Say this calmly and warmly, like a friendly household announcement."
+        speaking-rate: 1.05
+```
+
+See [configuration.md](configuration.md#google-gemini) for the full field reference.
 
 ## See also
 

@@ -83,6 +83,22 @@ class AudioConverterTest {
     }
 
     @Test
+    void aGeminiTargetRateNeverChangesWhatSourceRateIsRead() throws Exception {
+        // Gemini's native rate (24 kHz) reaches the converter as the source format, whatever
+        // sample rate the request asked for — the WAV header is authoritative, not the request.
+        byte[] wav = wavBytes(24000, 16, 1, new byte[] {1, 2});
+        SampleFormat expectedSource = new SampleFormat(24000, 16, 1, SampleType.PCM);
+        FormatConverter formatConverter = mock(FormatConverter.class);
+        when(formatConverter.canConvert(any(), any())).thenReturn(true);
+        when(formatConverter.convert(any(), any(), any())).thenReturn(ByteBuffer.wrap(new byte[] {0}));
+
+        new AudioConverter(formatConverter).convert(wav, SampleFormat.standard());
+
+        verify(formatConverter).canConvert(expectedSource, SampleFormat.standard());
+        verify(formatConverter).convert(any(), eq(expectedSource), eq(SampleFormat.standard()));
+    }
+
+    @Test
     void nonWavPayloadRaisesFormatNormalizationFailed() {
         FormatConverter formatConverter = mock(FormatConverter.class);
         AudioConverter converter = new AudioConverter(formatConverter);

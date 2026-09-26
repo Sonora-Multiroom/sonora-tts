@@ -64,4 +64,54 @@ class CacheKeyTest {
         assertThat(a.toHash()).isEqualTo(b.toHash());
         assertThat(c.toHash()).isEqualTo(d.toHash());
     }
+
+    // --- 004: the style prompt --------------------------------------------------------------
+
+    /**
+     * SHA-256 of a fixed pre-004 key with pitch and rate set, computed once with the 8-argument
+     * constructor before {@code stylePrompt} existed. Guards every existing pitch/rate cache entry.
+     */
+    private static final String HASH_PRE_004_WITH_PITCH_AND_RATE =
+            "9d4937d5b6d8b242a90d0fe1f1ec8c3ac82867080a8d9df2c9bb880c7fe771b1";
+
+    @Test
+    void aPinnedPreExistingKeyWithPitchAndRateHashesUnchanged() {
+        CacheKey key = new CacheKey("hello", "google", null, "v", "en-US", -2.0, 1.2, FORMAT);
+
+        assertThat(key.toHash()).isEqualTo(HASH_PRE_004_WITH_PITCH_AND_RATE);
+    }
+
+    @Test
+    void aNullStylePromptHashesExactlyLikeThe8ArgumentConstructor() {
+        CacheKey withNullPrompt = new CacheKey("hello", "gemini", "gemini-2.5-flash-tts", "Kore", "en-US",
+                null, null, FORMAT, null);
+        CacheKey noPromptField = new CacheKey("hello", "gemini", "gemini-2.5-flash-tts", "Kore", "en-US",
+                null, null, FORMAT);
+
+        assertThat(withNullPrompt.toHash()).isEqualTo(noPromptField.toHash());
+    }
+
+    @Test
+    void promptsDifferingOnlyInCaseHashDifferently() {
+        CacheKey calm = new CacheKey("hello", "gemini", "model", "Kore", "en-US", null, null, FORMAT, "Calm.");
+        CacheKey lowerCalm = new CacheKey("hello", "gemini", "model", "Kore", "en-US", null, null, FORMAT, "calm.");
+
+        assertThat(calm.toHash()).isNotEqualTo(lowerCalm.toHash());
+    }
+
+    @Test
+    void theSamePromptTwiceHashesTheSame() {
+        CacheKey a = new CacheKey("hello", "gemini", "model", "Kore", "en-US", null, null, FORMAT, "Calm.");
+        CacheKey b = new CacheKey("hello", "gemini", "model", "Kore", "en-US", null, null, FORMAT, "Calm.");
+
+        assertThat(a.toHash()).isEqualTo(b.toHash());
+    }
+
+    @Test
+    void aPromptedKeyHashesDifferentlyFromTheSameKeyWithoutAPrompt() {
+        CacheKey prompted = new CacheKey("hello", "gemini", "model", "Kore", "en-US", null, null, FORMAT, "Calm.");
+        CacheKey unprompted = new CacheKey("hello", "gemini", "model", "Kore", "en-US", null, null, FORMAT, null);
+
+        assertThat(prompted.toHash()).isNotEqualTo(unprompted.toHash());
+    }
 }

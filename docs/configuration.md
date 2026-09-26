@@ -170,7 +170,9 @@ To see which voices an entry offers:
 GET /api/tts/providers/google/voices?language=uk-UA&engine=chirp3-hd
 ```
 
-Both filters are optional. Other provider types answer `400`, and an unreachable catalogue `503`.
+Both filters are optional. Each voice has a `shortName`, `fullName`, `engine`, `language` and
+`gender` (Google's `ssmlGender`). A `google-gemini` entry lists too (see [Google Gemini](#google-gemini));
+`openai`, `piper` and `local-http` answer `400`, and an unreachable catalogue `503`.
 
 **Start-up faults.** Each of these aborts host start-up with
 `multiroom-tts: provider '<name>' …`, without contacting Google:
@@ -198,6 +200,72 @@ A `language` that differs from a full `voice`'s own language is only a warning.
 For obtaining a credential — enabling the API, billing, creating an API key or a service account
 key, and the roles a service account needs — see
 [google-cloud-tts-setup.md](google-cloud-tts-setup.md).
+
+## Google Gemini
+
+A `google-gemini` entry synthesizes through Gemini-TTS voices (`Kore`, `Charon`, …) — a separate
+provider type from `google-cloud`, not one of its engines. It always authenticates with a
+**service account key**; an `api-key` never works for Gemini and aborts start-up. Its style prompt
+is the reason to use it: a doorbell, a reminder and an alarm can each sound the way they should.
+
+```yaml
+multiroom:
+  tts:
+    default-provider: google           # keep a classic entry as the default — see the warning below
+    providers:
+      - name: google
+        type: google-cloud
+        api-key: ${GOOGLE_TTS_API_KEY}
+        voice: en-US-Neural2-C
+      - name: gemini
+        type: google-gemini
+        service-account-key-file: /home/tiger/.config/multiroom/sonora-tts-sa.json
+        model: gemini-2.5-flash-tts
+        voice: Kore
+        language: en-US
+        style-prompt: "Say this calmly and warmly, like a friendly household announcement."
+        speaking-rate: 1.05
+```
+
+| Key | Meaning |
+|---|---|
+| `service-account-key-file` | **Required.** Exactly as for `google-cloud`: read and checked once at start-up, never contacted at boot |
+| `model` | **Required.** The Gemini-TTS model, e.g. `gemini-2.5-flash-tts`. Lower-case letters, digits, dots and hyphens. Not overridable per request |
+| `voice` | **Required.** A Gemini voice name, e.g. `Kore`: one word of ASCII letters, any case (normalized to `Kore`). Listed by the voice-listing endpoint, but not checked against it — an unknown voice is Google's own refusal |
+| `language` | **Required.** A language-region tag (`uk-UA`, `cmn-CN`, `es-419`); Google refuses a Gemini request without one |
+| `style-prompt` | The default style prompt, sent to Google separately from the text. Leading/trailing whitespace is removed; at most `max-text-length` characters |
+| `speaking-rate` | [0.25, 2.0], 1.0 natural speed. Same rules as `google-cloud`. **`pitch` is rejected**: Google silently ignores it for Gemini voices |
+| `timeout-seconds` | Default `10`, covering the token fetch and the synthesis together. Raise it for a slower model or longer texts |
+
+Every existing `google-cloud`, `openai`, `piper` and `local-http` entry keeps working unchanged;
+`google-gemini` adds no field to any other type.
+
+**Start-up faults**, each aborting host start-up with `multiroom-tts: provider '<name>' …`,
+without contacting Google:
+
+- `api-key` set (with or without a key file): Gemini voices require a service account key file and
+  cannot use an API key;
+- no `service-account-key-file`, `model`, `voice` or `language`, or one of them malformed;
+- `engine`, `pitch`, or a non-empty `extra-params`: Gemini does not support them;
+- `speaking-rate` out of range;
+- `style-prompt` longer than `max-text-length` after trimming;
+- `style-prompt` or `model` set on any type other than `google-gemini`;
+- any key-file fault (missing, unreadable, not a service account key, …), exactly as for
+  `google-cloud`.
+
+**Voice listing.** `GET /api/tts/providers/gemini/voices` lists the Gemini voices Google publishes,
+each with the entry's model as `engine`, its `gender`, and no `language`, sorted by name. The
+`voice-catalogue` settings above govern it as for `google-cloud`, and nothing is fetched at
+start-up. A `language` filter is checked for form but does not narrow the list, since Gemini voices
+are not tied to one; an `engine` filter is a `400`. The list is for choosing a voice only: an
+announcement's voice is never checked against it, and Google's list is not per model.
+
+**Cost warning.** When the effective default provider (`default-provider`, or else the first
+enabled entry) is `google-gemini`, start-up logs one `WARN`, because every announcement without a
+`providerName` is then billed per token — Gemini has no free tier. Start-up still continues.
+
+For the Agent Platform API, the service account role, Gemini models, choosing a voice and writing a
+style prompt, see [google-cloud-tts-setup.md](google-cloud-tts-setup.md#gemini-voices-google-gemini).
 
 ## A local HTTP service (Ollama, a custom script, anything that speaks JSON over HTTP)
 
@@ -245,16 +313,18 @@ The host starts normally, the extension inventory reports `tts` as `DISABLED`, a
 | Field | Applies to | Notes |
 |---|---|---|
 | `name` | all | Unique; used in requests (`providerName`) and the cache key |
-| `type` | all | `OPENAI`, `GOOGLE_CLOUD`, `PIPER`, or `LOCAL_HTTP` |
+| `type` | all | `OPENAI`, `GOOGLE_CLOUD`, `GOOGLE_GEMINI`, `PIPER`, or `LOCAL_HTTP` |
 | `enabled` | all | `true` by default; set `false` to keep a config entry without using it |
-| `api-key` | `OPENAI`, `GOOGLE_CLOUD` | `OPENAI`: required. `GOOGLE_CLOUD`: exactly one of `api-key` and `service-account-key-file`. Validated as non-blank only, never contacted at boot |
-| `service-account-key-file` | `GOOGLE_CLOUD` | A path to a service account's JSON key. Read and checked once at start-up; never contacted at boot. A start-up fault on any other type |
-| `voice` | all | Default voice; a request may override it. `GOOGLE_CLOUD`: a full or short name (see [Google Cloud](#google-cloud)) |
-| `language` | all | Default BCP 47 tag; a request may override it. No declared default: other types fall back to `en-US`, `GOOGLE_CLOUD` to the voice's own language |
-| `engine` | all | `OPENAI`: the model (`tts-1`, ...), folded into the cache key. `GOOGLE_CLOUD`: the default engine for short voice names, validated |
-| `pitch` | `GOOGLE_CLOUD` | Semitones, [-20.0, 20.0]. A start-up fault on any other type |
-| `speaking-rate` | `GOOGLE_CLOUD` | [0.25, 2.0]. A start-up fault on any other type |
-| `extra-params` | all but `GOOGLE_CLOUD` | Provider-specific parameters. Must be empty for `GOOGLE_CLOUD` |
+| `api-key` | `OPENAI`, `GOOGLE_CLOUD` | `OPENAI`: required. `GOOGLE_CLOUD`: exactly one of `api-key` and `service-account-key-file`. `GOOGLE_GEMINI`: forbidden — a start-up fault. Validated as non-blank only, never contacted at boot |
+| `service-account-key-file` | `GOOGLE_CLOUD`, `GOOGLE_GEMINI` | A path to a service account's JSON key. Read and checked once at start-up; never contacted at boot. `GOOGLE_GEMINI`: required. A start-up fault on any other type |
+| `model` | `GOOGLE_GEMINI` | **New.** The Gemini-TTS model, e.g. `gemini-2.5-flash-tts`. Required; not overridable per request. A start-up fault on any other type |
+| `voice` | all | Default voice; a request may override it. `GOOGLE_CLOUD`: a full or short name (see [Google Cloud](#google-cloud)). `GOOGLE_GEMINI`: a Gemini voice name (see [Google Gemini](#google-gemini)) |
+| `language` | all | Default BCP 47 tag; a request may override it. No declared default: other types fall back to `en-US`, `GOOGLE_CLOUD` to the voice's own language, `GOOGLE_GEMINI` requires one explicitly |
+| `engine` | all but `GOOGLE_GEMINI` | `OPENAI`: the model (`tts-1`, ...), folded into the cache key. `GOOGLE_CLOUD`: the default engine for short voice names, validated. A start-up fault on `GOOGLE_GEMINI` |
+| `pitch` | `GOOGLE_CLOUD` | Semitones, [-20.0, 20.0]. A start-up fault on any other type, `GOOGLE_GEMINI` included (Google silently ignores pitch for Gemini voices) |
+| `speaking-rate` | `GOOGLE_CLOUD`, `GOOGLE_GEMINI` | [0.25, 2.0]. A start-up fault on any other type |
+| `style-prompt` | `GOOGLE_GEMINI` | **New.** The default style prompt, sent separately from the text. Trimmed; at most `max-text-length` characters. A start-up fault on any other type |
+| `extra-params` | all but `GOOGLE_CLOUD`, `GOOGLE_GEMINI` | Provider-specific parameters. Must be empty for `GOOGLE_CLOUD` and `GOOGLE_GEMINI` |
 | `timeout-seconds` | all | Default `10`. Raising it trades away the 10 s error-response budget; a start-up `WARN` names any provider configured above 10 |
 | `python-executable` | `PIPER` | Default `python3`. The interpreter with `piper-tts` installed — **not** a Piper binary; piper1-gpl ships no standalone executable, only a `python3 -m piper` module. Not checked at start-up (see above) |
 | `model-path` | `PIPER` | Path to the ONNX voice model; must exist at start-up, and so must `<model-path>.json` next to it |
@@ -356,13 +426,24 @@ Content-Type: application/json
 
 `providerName`, `voice` and `language` are all optional — omit any of them and the chosen
 provider's configured default is used. `GOOGLE_CLOUD` providers also accept `engine`, `pitch` and
-`speakingRate`; any other provider type rejects them with `400 INVALID_REQUEST`:
+`speakingRate`; `GOOGLE_GEMINI` providers accept `speakingRate` and `stylePrompt`; any provider
+type rejects a field it does not support with `400 INVALID_REQUEST`:
 
 ```json
 { "text": "Dinner is ready", "targetName": "kitchen", "targetType": "SINGLE_OUTPUT",
   "providerName": "google", "engine": "neural2", "voice": "c", "language": "en-US", "speakingRate": 0.9 }
 ```
- `targetType` is `SINGLE_OUTPUT` (target a single output by
+
+```json
+{ "text": "Someone is at the front door", "targetName": "all-rooms", "targetType": "OUTPUT_GROUP",
+  "providerName": "gemini", "voice": "Kore", "stylePrompt": "Announce this clearly and with a little urgency." }
+```
+
+`stylePrompt` (`GOOGLE_GEMINI` only): omit it to use the entry's default style prompt, if it has
+one; send `""` (or only whitespace) to turn the default off for that announcement; any other value
+replaces it. Leading and trailing whitespace is stripped before it is sent or cached.
+
+`targetType` is `SINGLE_OUTPUT` (target a single output by
 name) or `OUTPUT_GROUP` (target a group; every output in it plays in sync).
 
 Response (`202 Accepted`):

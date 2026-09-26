@@ -20,17 +20,12 @@ public final class GoogleVoiceResolver {
     public static final double MIN_PITCH = -20.0;
     public static final double MAX_PITCH = 20.0;
 
-    /** Speaking-rate range, inclusive, from Google's v1 AudioConfig. */
-    public static final double MIN_SPEAKING_RATE = 0.25;
-    public static final double MAX_SPEAKING_RATE = 2.0;
-
     /**
-     * Google's own defaults. An explicit default sounds exactly like no value, so it is left out
+     * Google's own default. An explicit default sounds exactly like no value, so it is left out
      * of the cache key and shares the entry of no value — while still being
-     * sent, because it was set.
+     * sent, because it was set. Speaking rate's own neutral value lives in {@link GoogleSpeakingRate}.
      */
     private static final double NEUTRAL_PITCH = 0.0;
-    private static final double NEUTRAL_SPEAKING_RATE = 1.0;
 
     /** Used only when no voice is set anywhere, so there is no voice to take a language from. */
     private static final GoogleLanguage FALLBACK_LANGUAGE = GoogleLanguage.parse("en-US");
@@ -82,13 +77,19 @@ public final class GoogleVoiceResolver {
 
     /**
      * @throws TtsException {@link TtsErrorCode#INVALID_REQUEST} for a malformed override, one that
-     *                      contradicts the voice, or a short voice that cannot be completed
+     *                      contradicts the voice, a short voice that cannot be completed, or a
+     *                      {@code stylePrompt} — even an empty one, since it asks for prompt
+     *                      behaviour {@code google-cloud} does not have
      */
     public SynthesisSettings resolve(RequestedSettings requested) {
+        if (requested.stylePrompt() != null) {
+            throw invalid("Field 'stylePrompt' is not supported by provider '" + config.getName() + "' of type "
+                    + config.getType());
+        }
         GoogleEngine requestedEngine = parseRequestedEngine(requested.engine());
         GoogleLanguage requestedLanguage = parseRequestedLanguage(requested.language());
         checkRange("pitch", requested.pitch(), MIN_PITCH, MAX_PITCH);
-        checkRange("speakingRate", requested.speakingRate(), MIN_SPEAKING_RATE, MAX_SPEAKING_RATE);
+        GoogleSpeakingRate.check("speakingRate", requested.speakingRate());
         Double pitch = requested.pitch() != null ? requested.pitch() : config.getPitch();
         Double speakingRate = requested.speakingRate() != null ? requested.speakingRate() : config.getSpeakingRate();
 
@@ -151,7 +152,7 @@ public final class GoogleVoiceResolver {
         // and Google voice names are unique regardless of case.
         String voiceKey = voice == null ? null : voice.toLowerCase(Locale.ROOT);
         return new SynthesisSettings(voice, voiceKey, requestedVoice, language.tag(), null,
-                pitch, speakingRate, keyOf(pitch, NEUTRAL_PITCH), keyOf(speakingRate, NEUTRAL_SPEAKING_RATE));
+                pitch, speakingRate, keyOf(pitch, NEUTRAL_PITCH), GoogleSpeakingRate.keyOf(speakingRate));
     }
 
     private static Double keyOf(Double value, double neutral) {

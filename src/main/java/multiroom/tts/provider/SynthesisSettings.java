@@ -24,16 +24,26 @@ package multiroom.tts.provider;
  *                        considers the value neutral, so an explicit default shares the entry of
  *                        no value
  * @param speakingRateKey the cache-key form of {@code speakingRate}, on the same terms
+ * @param stylePrompt     the effective style prompt, already stripped ({@code google-gemini}
+ *                        only); {@code null} means none. Already normalized, so it is its own
+ *                        cache-key form
  */
 public record SynthesisSettings(String voice, String voiceKey, String requestedVoice, String language,
                                 String engine, Double pitch, Double speakingRate, Double pitchKey,
-                                Double speakingRateKey) {
+                                Double speakingRateKey, String stylePrompt) {
+
+    /** The pre-004 shape, for every provider that never resolves a style prompt. */
+    public SynthesisSettings(String voice, String voiceKey, String requestedVoice, String language,
+                             String engine, Double pitch, Double speakingRate, Double pitchKey,
+                             Double speakingRateKey) {
+        this(voice, voiceKey, requestedVoice, language, engine, pitch, speakingRate, pitchKey, speakingRateKey, null);
+    }
 
     /**
      * Settings with no audio adjustments, whose voice is its own cache key and its own requested
      * spelling — the 001 shape every non-Google provider resolves to.
      */
     public static SynthesisSettings of(String voice, String language, String engine) {
-        return new SynthesisSettings(voice, voice, voice, language, engine, null, null, null, null);
+        return new SynthesisSettings(voice, voice, voice, language, engine, null, null, null, null, null);
     }
 }

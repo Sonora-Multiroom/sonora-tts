@@ -17,7 +17,8 @@ import java.util.stream.Collectors;
 
 /**
  * Answers {@code GET /api/tts/providers/{name}/voices}: finds the provider, checks
- * that its type can list voices, and delegates to its catalogue.
+ * that its type can list voices ({@code google-cloud} and {@code google-gemini}), checks the
+ * form of the language filter, and delegates to its catalogue.
  */
 public class VoiceQueryService {
 

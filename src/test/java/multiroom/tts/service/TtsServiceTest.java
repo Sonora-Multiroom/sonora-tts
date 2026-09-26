@@ -34,6 +34,7 @@ import multiroom.tts.provider.SynthesisResult;
 import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.provider.cloud.GoogleCloudTtsProvider;
+import multiroom.tts.provider.cloud.GoogleGeminiTtsProvider;
 import multiroom.tts.provider.cloud.google.ServiceAccountKey;
 import multiroom.tts.provider.cloud.google.TestServiceAccountKeys;
 import org.junit.jupiter.api.BeforeEach;
@@ -589,6 +590,238 @@ class TtsServiceTest {
             assertThat(keys.get(0).toHash()).isEqualTo(keys.get(1).toHash());
             // A hit returns before the provider is called: no token, no catalogue, no synthesis.
             server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    // --- 004: a real GoogleGeminiTtsProvider decides the key -----------------------------------
+
+    private static TtsProviderConfig geminiEntry() {
+        TtsProviderConfig config = new TtsProviderConfig();
+        config.setName("gemini");
+        config.setType(ProviderType.GOOGLE_GEMINI);
+        config.setServiceAccountKeyFile("sa.json");
+        config.setModel("gemini-2.5-flash-tts");
+        config.setVoice("Kore");
+        config.setLanguage("en-US");
+        return config;
+    }
+
+    private TtsService realGeminiService(WireMockServer server, ServiceAccountKey key) {
+        TtsProperties properties = new TtsProperties();
+        TtsProviderConfig gemini = geminiEntry();
+        properties.setProviders(List.of(gemini));
+        GoogleGeminiTtsProvider provider = new GoogleGeminiTtsProvider(gemini, new VoiceCatalogueProperties(), key,
+                properties.getMaxTextLength(), URI.create(server.baseUrl() + "/v1/"), Clock.systemUTC());
+        return new TtsService(properties, new ProviderRegistry(Map.of("gemini", provider), "gemini"),
+                audioConverter, audioCache, inputResolver, deviceRegistryService, deviceQueryService, routeService,
+                completionListener);
+    }
+
+    private static AnnounceCommand geminiCommand(String voice, String language, Double speakingRate) {
+        return new AnnounceCommand("Dinner is ready", "living-room", TargetType.SINGLE_OUTPUT, "gemini",
+                voice, language, null, null, speakingRate, null);
+    }
+
+    private static AnnounceCommand geminiCommandWithPrompt(String stylePrompt) {
+        return new AnnounceCommand("Dinner is ready", "living-room", TargetType.SINGLE_OUTPUT, "gemini",
+                null, null, null, null, null, stylePrompt);
+    }
+
+    private TtsService realGeminiServiceWithDefaultPrompt(WireMockServer server, ServiceAccountKey key,
+                                                           String defaultPrompt) {
+        TtsProperties properties = new TtsProperties();
+        TtsProviderConfig gemini = geminiEntry();
+        gemini.setStylePrompt(defaultPrompt);
+        properties.setProviders(List.of(gemini));
+        GoogleGeminiTtsProvider provider = new GoogleGeminiTtsProvider(gemini, new VoiceCatalogueProperties(), key,
+                properties.getMaxTextLength(), URI.create(server.baseUrl() + "/v1/"), Clock.systemUTC());
+        return new TtsService(properties, new ProviderRegistry(Map.of("gemini", provider), "gemini"),
+                audioConverter, audioCache, inputResolver, deviceRegistryService, deviceQueryService, routeService,
+                completionListener);
+    }
+
+    /** A statefully backed cache mock, so a repeated announcement is a genuine hit. */
+    private void useStatefulCache() {
+        Map<CacheKey, java.nio.file.Path> stored = new java.util.HashMap<>();
+        when(audioCache.get(any())).thenAnswer(inv -> Optional.ofNullable(stored.get(inv.getArgument(0))));
+        when(audioCache.put(any(), any())).thenAnswer(inv -> {
+            CacheKey key = inv.getArgument(0);
+            java.nio.file.Path path = java.nio.file.Path.of("cache/" + key.toHash() + ".wav");
+            stored.put(key, path);
+            return path;
+        });
+    }
+
+    private void stubGeminiToken(WireMockServer server) {
+        server.stubFor(post(urlPathEqualTo("/token")).willReturn(
+                aResponse().withStatus(200).withBody("{\"access_token\":\"ya29.test\",\"expires_in\":3599}")));
+    }
+
+    private void stubGeminiSynthesis(WireMockServer server) throws Exception {
+        server.stubFor(post(urlPathEqualTo("/v1/text:synthesize")).willReturn(aResponse().withStatus(200)
+                .withBody("{\"audioContent\":\"" + java.util.Base64.getEncoder().encodeToString(fakeProviderWav()) + "\"}")));
+    }
+
+    @Test
+    void gemini_repeatedAnnouncementIsAHitWithNoHttpCall(@TempDir java.nio.file.Path keyDir) throws Exception {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            stubGeminiToken(server);
+            stubGeminiSynthesis(server);
+            useStatefulCache();
+            ServiceAccountKey key = ServiceAccountKey.load("gemini", TestServiceAccountKeys.write(keyDir, server.baseUrl() + "/token"));
+            TtsService service = realGeminiService(server, key);
+
+            AnnounceResult first = service.speak(geminiCommand(null, null, null));
+            server.resetRequests();
+            AnnounceResult second = service.speak(geminiCommand(null, null, null));
+
+            assertThat(first.cacheHit()).isFalse();
+            assertThat(second.cacheHit()).isTrue();
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void gemini_voiceKORECaseInsensitivelyHitsTheEntryCreatedWithKore(@TempDir java.nio.file.Path keyDir) throws Exception {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            stubGeminiToken(server);
+            stubGeminiSynthesis(server);
+            useStatefulCache();
+            ServiceAccountKey key = ServiceAccountKey.load("gemini", TestServiceAccountKeys.write(keyDir, server.baseUrl() + "/token"));
+            TtsService service = realGeminiService(server, key);
+
+            service.speak(geminiCommand("Kore", null, null));
+            server.resetRequests();
+            AnnounceResult second = service.speak(geminiCommand("KORE", null, null));
+
+            assertThat(second.cacheHit()).isTrue();
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void gemini_aDifferentLanguageOrVoiceIsASeparateCacheEntry(@TempDir java.nio.file.Path keyDir) throws Exception {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            stubGeminiToken(server);
+            stubGeminiSynthesis(server);
+            useStatefulCache();
+            ServiceAccountKey key = ServiceAccountKey.load("gemini", TestServiceAccountKeys.write(keyDir, server.baseUrl() + "/token"));
+            TtsService service = realGeminiService(server, key);
+
+            service.speak(geminiCommand(null, null, null));
+            AnnounceResult differentLanguage = service.speak(geminiCommand(null, "uk-UA", null));
+            AnnounceResult differentVoice = service.speak(geminiCommand("Charon", null, null));
+
+            assertThat(differentLanguage.cacheHit()).isFalse();
+            assertThat(differentVoice.cacheHit()).isFalse();
+            server.verify(3, postRequestedFor(urlPathEqualTo("/v1/text:synthesize")));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void gemini_threeDistinctPromptsAreThreeCacheEntriesAndEachRepeatIsAHit(@TempDir java.nio.file.Path keyDir)
+            throws Exception {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            stubGeminiToken(server);
+            stubGeminiSynthesis(server);
+            useStatefulCache();
+            ServiceAccountKey key = ServiceAccountKey.load("gemini", TestServiceAccountKeys.write(keyDir, server.baseUrl() + "/token"));
+            TtsService service = realGeminiServiceWithDefaultPrompt(server, key, "Say this calmly.");
+
+            AnnounceResult noPrompt = service.speak(geminiCommandWithPrompt(null));
+            AnnounceResult otherPrompt = service.speak(geminiCommandWithPrompt("Announce this urgently."));
+            AnnounceResult emptyPrompt = service.speak(geminiCommandWithPrompt(""));
+
+            assertThat(noPrompt.cacheHit()).isFalse();
+            assertThat(otherPrompt.cacheHit()).isFalse();
+            assertThat(emptyPrompt.cacheHit()).isFalse();
+            server.verify(3, postRequestedFor(urlPathEqualTo("/v1/text:synthesize")));
+
+            server.resetRequests();
+            assertThat(service.speak(geminiCommandWithPrompt(null)).cacheHit()).isTrue();
+            assertThat(service.speak(geminiCommandWithPrompt("Announce this urgently.")).cacheHit()).isTrue();
+            assertThat(service.speak(geminiCommandWithPrompt("")).cacheHit()).isTrue();
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void gemini_anEmptyAndABlankRequestPromptShareOneEntry(@TempDir java.nio.file.Path keyDir) throws Exception {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            stubGeminiToken(server);
+            stubGeminiSynthesis(server);
+            useStatefulCache();
+            ServiceAccountKey key = ServiceAccountKey.load("gemini", TestServiceAccountKeys.write(keyDir, server.baseUrl() + "/token"));
+            TtsService service = realGeminiServiceWithDefaultPrompt(server, key, "Say this calmly.");
+
+            service.speak(geminiCommandWithPrompt(""));
+            server.resetRequests();
+            AnnounceResult blank = service.speak(geminiCommandWithPrompt("  "));
+
+            assertThat(blank.cacheHit()).isTrue();
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void gemini_withNoDefaultConfiguredNoPromptAndAnEmptyPromptShareOneEntry(@TempDir java.nio.file.Path keyDir)
+            throws Exception {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            stubGeminiToken(server);
+            stubGeminiSynthesis(server);
+            useStatefulCache();
+            ServiceAccountKey key = ServiceAccountKey.load("gemini", TestServiceAccountKeys.write(keyDir, server.baseUrl() + "/token"));
+            TtsService service = realGeminiService(server, key);
+
+            service.speak(geminiCommandWithPrompt(null));
+            server.resetRequests();
+            AnnounceResult empty = service.speak(geminiCommandWithPrompt(""));
+
+            assertThat(empty.cacheHit()).isTrue();
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void gemini_theCacheKeysEngineNameIsTheModel(@TempDir java.nio.file.Path keyDir) throws Exception {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            stubGeminiToken(server);
+            stubGeminiSynthesis(server);
+            when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+            ServiceAccountKey key = ServiceAccountKey.load("gemini", TestServiceAccountKeys.write(keyDir, server.baseUrl() + "/token"));
+            TtsService service = realGeminiService(server, key);
+
+            service.speak(geminiCommand(null, null, null));
+
+            assertThat(lookedUpKeys(1).get(0).engineName()).isEqualTo("gemini-2.5-flash-tts");
         } finally {
             server.stop();
         }

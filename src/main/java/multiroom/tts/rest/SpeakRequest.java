@@ -9,8 +9,10 @@ import multiroom.api.model.TargetType;
  * field. {@code text}'s maximum length is operator-configured, so it is enforced by
  * {@code TtsService}, not by a static annotation here.
  *
- * <p>{@code engine}, {@code pitch} and {@code speakingRate} are {@code google-cloud} only; the
- * provider rejects them for any other type, and range-checks them itself.
+ * <p>{@code engine} and {@code pitch} are {@code google-cloud} only; {@code speakingRate} is
+ * accepted by {@code google-cloud} and {@code google-gemini}; {@code stylePrompt} is
+ * {@code google-gemini} only. Each provider rejects a field it does not support, and range-checks
+ * the ones it does, itself.
  */
 public record SpeakRequest(
         @NotBlank(message = "Text must not be blank") String text,
@@ -21,5 +23,6 @@ public record SpeakRequest(
         String language,
         String engine,
         Double pitch,
-        Double speakingRate) {
+        Double speakingRate,
+        String stylePrompt) {
 }

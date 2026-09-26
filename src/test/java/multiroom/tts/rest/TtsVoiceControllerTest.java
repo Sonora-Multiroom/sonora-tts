@@ -46,6 +46,31 @@ class TtsVoiceControllerTest {
     }
 
     @Test
+    void aGoogleCloudVoiceCarriesItsGender() throws Exception {
+        when(voiceQueryService.listVoices("google", null, null)).thenReturn(List.of(
+                new CatalogueVoice("uk-UA-Chirp3-HD-Charon", "Charon", "Chirp3-HD", "uk-UA", "MALE")));
+
+        mockMvc.perform(get("/api/tts/providers/google/voices"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.voices[0].language").value("uk-UA"))
+                .andExpect(jsonPath("$.voices[0].gender").value("MALE"));
+    }
+
+    @Test
+    void aGeminiVoiceHasTheModelAsEngineAndNoLanguageKey() throws Exception {
+        when(voiceQueryService.listVoices("gemini", null, null)).thenReturn(List.of(
+                new CatalogueVoice("Kore", "Kore", "gemini-2.5-flash-tts", null, "FEMALE")));
+
+        mockMvc.perform(get("/api/tts/providers/gemini/voices"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.voices[0].shortName").value("Kore"))
+                .andExpect(jsonPath("$.voices[0].fullName").value("Kore"))
+                .andExpect(jsonPath("$.voices[0].engine").value("gemini-2.5-flash-tts"))
+                .andExpect(jsonPath("$.voices[0].gender").value("FEMALE"))
+                .andExpect(jsonPath("$.voices[0].language").doesNotExist());
+    }
+
+    @Test
     void filtersAreOptional() throws Exception {
         when(voiceQueryService.listVoices(any(), isNull(), isNull())).thenReturn(List.of());
 

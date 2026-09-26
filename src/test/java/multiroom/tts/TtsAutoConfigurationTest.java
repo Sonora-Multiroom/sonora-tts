@@ -171,4 +171,101 @@ class TtsAutoConfigurationTest {
                     assertThat(context).doesNotHaveBean(ProviderRegistry.class);
                 });
     }
+
+    // --- 004: a google-gemini entry -------------------------------------------------------------
+
+    @Test
+    void aValidGeminiEntryStartsWithNoRequestToGoogleAndBuildsTheGeminiProvider(@TempDir Path dir) {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            Path keyFile = TestServiceAccountKeys.write(dir, server.baseUrl() + "/token");
+
+            contextRunner.withPropertyValues(
+                    "multiroom.tts.providers[1].name=gemini",
+                    "multiroom.tts.providers[1].type=google-gemini",
+                    "multiroom.tts.providers[1].service-account-key-file=" + keyFile,
+                    "multiroom.tts.providers[1].model=gemini-2.5-flash-tts",
+                    "multiroom.tts.providers[1].voice=Kore",
+                    "multiroom.tts.providers[1].language=en-US"
+            ).run(context -> {
+                assertThat(context.getStartupFailure()).isNull();
+                ProviderRegistry registry = context.getBean(ProviderRegistry.class);
+                assertThat(registry.resolve("gemini"))
+                        .isInstanceOf(multiroom.tts.provider.cloud.GoogleGeminiTtsProvider.class);
+            });
+
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    private ApplicationContextRunner withGeminiKeyFile(String keyFile) {
+        return contextRunner.withPropertyValues(
+                "multiroom.tts.providers[1].name=gemini",
+                "multiroom.tts.providers[1].type=google-gemini",
+                "multiroom.tts.providers[1].service-account-key-file=" + keyFile,
+                "multiroom.tts.providers[1].model=gemini-2.5-flash-tts",
+                "multiroom.tts.providers[1].voice=Kore",
+                "multiroom.tts.providers[1].language=en-US");
+    }
+
+    @Test
+    void aMissingGeminiKeyFileAbortsStartUpNamingTheAbsolutePath(@TempDir Path dir) {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            Path missing = dir.resolve("absent.json");
+
+            withGeminiKeyFile(missing.toString()).run(context -> assertThat(context.getStartupFailure())
+                    .hasRootCauseInstanceOf(IllegalStateException.class)
+                    .rootCause()
+                    .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                    .hasMessageContaining(missing.toAbsolutePath().toString())
+                    .hasMessageContaining("does not exist"));
+
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void aGeminiKeyFileThatIsAnOAuthClientJsonAbortsStartUp(@TempDir Path dir) {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            Path wrongType = TestServiceAccountKeys.write(dir, Map.of("type", "authorized_user"));
+
+            withGeminiKeyFile(wrongType.toString()).run(context -> assertThat(context.getStartupFailure())
+                    .hasRootCauseInstanceOf(IllegalStateException.class)
+                    .rootCause()
+                    .hasMessageStartingWith("multiroom-tts: provider 'gemini'")
+                    .hasMessageContaining(wrongType.toAbsolutePath().toString()));
+
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void aDisabledExtensionStartsWithNoBeansDespiteABrokenGeminiEntry(@TempDir Path dir) {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            withGeminiKeyFile(dir.resolve("absent.json").toString())
+                    .withPropertyValues("multiroom.tts.enabled=false")
+                    .run(context -> {
+                        assertThat(context.getStartupFailure()).isNull();
+                        assertThat(context).doesNotHaveBean(TtsService.class);
+                        assertThat(context).doesNotHaveBean(ProviderRegistry.class);
+                    });
+
+            server.verify(0, anyRequestedFor(anyUrl()));
+        } finally {
+            server.stop();
+        }
+    }
 }

@@ -2,8 +2,11 @@ package multiroom.tts.config;
 
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
+import multiroom.tts.provider.cloud.google.GeminiModel;
+import multiroom.tts.provider.cloud.google.GeminiVoice;
 import multiroom.tts.provider.cloud.google.GoogleEngine;
 import multiroom.tts.provider.cloud.google.GoogleLanguage;
+import multiroom.tts.provider.cloud.google.GoogleSpeakingRate;
 import multiroom.tts.provider.cloud.google.GoogleVoiceName;
 import multiroom.tts.provider.cloud.google.GoogleVoiceResolver;
 import org.slf4j.Logger;
@@ -95,6 +98,28 @@ public class TtsProperties {
                         + "disabled; enable it or point default-provider at an enabled provider");
             }
         }
+
+        warnIfGeminiIsTheEffectiveDefault();
+    }
+
+    /**
+     * The effective default is {@code default-provider} when set, or else the first
+     * <strong>enabled</strong> entry — the same rule {@code ProviderRegistry} applies. A
+     * {@code google-gemini} effective default is allowed, but every announcement without a
+     * {@code providerName} then costs Gemini tokens, so start-up warns and continues.
+     */
+    private void warnIfGeminiIsTheEffectiveDefault() {
+        TtsProviderConfig effectiveDefault;
+        if (defaultProvider != null && !defaultProvider.isBlank()) {
+            effectiveDefault = providers.stream().filter(p -> p.getName().equals(defaultProvider)).findFirst()
+                    .orElse(null);
+        } else {
+            effectiveDefault = providers.stream().filter(TtsProviderConfig::isEnabled).findFirst().orElse(null);
+        }
+        if (effectiveDefault != null && effectiveDefault.getType() == ProviderType.GOOGLE_GEMINI) {
+            log.warn("multiroom-tts: provider '{}' (google-gemini) is the default provider; every announcement "
+                    + "without a providerName is synthesized by Gemini and billed per token", effectiveDefault.getName());
+        }
     }
 
     private void validateProvider(TtsProviderConfig provider) {
@@ -105,6 +130,7 @@ public class TtsProperties {
                 validateGoogleVoiceSelection(provider);
                 validateGoogleAudioSettings(provider);
             }
+            case GOOGLE_GEMINI -> validateGoogleGeminiEntry(provider);
             case PIPER -> {
                 // pythonExecutable is not checked for existence: it defaults to "python3",
                 // a bare command resolved via PATH, not a literal filesystem path — and
@@ -124,10 +150,20 @@ public class TtsProperties {
             }
         }
         if (provider.getType() != ProviderType.GOOGLE_CLOUD) {
-            // Never accepted and silently ignored: only google-cloud sends them.
-            rejectGoogleOnlySetting(provider, "pitch", provider.getPitch() != null);
-            rejectGoogleOnlySetting(provider, "speaking-rate", provider.getSpeakingRate() != null);
-            rejectGoogleOnlySetting(provider, "service-account-key-file", isSet(provider.getServiceAccountKeyFile()));
+            // Never accepted and silently ignored: only google-cloud sends pitch.
+            rejectSetting(provider, "pitch", provider.getPitch() != null, "google-cloud supports");
+        }
+        if (provider.getType() != ProviderType.GOOGLE_CLOUD && provider.getType() != ProviderType.GOOGLE_GEMINI) {
+            // Speaking rate and the key file are shared by both Google types.
+            rejectSetting(provider, "speaking-rate", provider.getSpeakingRate() != null,
+                    "google-cloud and google-gemini support");
+            rejectSetting(provider, "service-account-key-file", isSet(provider.getServiceAccountKeyFile()),
+                    "google-cloud and google-gemini support");
+        }
+        if (provider.getType() != ProviderType.GOOGLE_GEMINI) {
+            // Never accepted and silently ignored: no other type reads them.
+            rejectSetting(provider, "style-prompt", isSet(provider.getStylePrompt()), "google-gemini supports");
+            rejectSetting(provider, "model", isSet(provider.getModel()), "google-gemini supports");
         }
 
         if (provider.getTimeoutSeconds() > TIMEOUT_WARN_THRESHOLD_SECONDS) {
@@ -142,7 +178,7 @@ public class TtsProperties {
         requireInRange(provider, "pitch", provider.getPitch(),
                 GoogleVoiceResolver.MIN_PITCH, GoogleVoiceResolver.MAX_PITCH);
         requireInRange(provider, "speaking-rate", provider.getSpeakingRate(),
-                GoogleVoiceResolver.MIN_SPEAKING_RATE, GoogleVoiceResolver.MAX_SPEAKING_RATE);
+                GoogleSpeakingRate.MIN, GoogleSpeakingRate.MAX);
         // extra-params would otherwise be accepted and ignored. Mapping arbitrary keys is
         // not offered: whether a setting took effect would then depend on how its key was spelled.
         if (provider.getExtraParams() != null && !provider.getExtraParams().isEmpty()) {
@@ -159,10 +195,67 @@ public class TtsProperties {
         }
     }
 
-    private static void rejectGoogleOnlySetting(TtsProviderConfig provider, String key, boolean set) {
+    private static void rejectSetting(TtsProviderConfig provider, String key, boolean set, String supportersClause) {
         if (set) {
-            throw fault("provider '" + provider.getName() + "' sets " + key + ", which only google-cloud "
-                    + "supports; a provider of type " + provider.getType() + " would ignore it");
+            throw fault("provider '" + provider.getName() + "' sets " + key + ", which only " + supportersClause
+                    + "; a provider of type " + provider.getType() + " would ignore it");
+        }
+    }
+
+    /**
+     * {@code google-gemini}: a service account key file, model, voice and language are required;
+     * an {@code api-key} can never work for Gemini, so it is rejected first, ahead of the missing
+     * key-file check, and reports the more useful fault when an entry sets both.
+     */
+    private void validateGoogleGeminiEntry(TtsProviderConfig provider) {
+        if (isSet(provider.getApiKey())) {
+            throw fault("provider '" + provider.getName() + "' has an api-key: Gemini voices require a "
+                    + "service account key file and cannot use an API key");
+        }
+        if (!isSet(provider.getServiceAccountKeyFile())) {
+            throw fault("provider '" + provider.getName() + "' requires service-account-key-file");
+        }
+        requireNonBlank(provider, "model", provider.getModel());
+        requireNonBlank(provider, "voice", provider.getVoice());
+        requireNonBlank(provider, "language", provider.getLanguage());
+        if (!GeminiModel.isWellFormed(provider.getModel())) {
+            throw fault("provider '" + provider.getName() + "' has model '" + provider.getModel()
+                    + "', which is not a well-formed Gemini model name");
+        }
+        if (!GeminiVoice.isWellFormed(provider.getVoice())) {
+            throw fault("provider '" + provider.getName() + "' has voice '" + provider.getVoice()
+                    + "', which is not a Gemini voice name: one word of letters, such as Kore");
+        }
+        if (!GoogleLanguage.isWellFormed(provider.getLanguage())) {
+            throw fault("provider '" + provider.getName() + "' has language '" + provider.getLanguage()
+                    + "', which is not a language-region tag such as uk-UA, cmn-CN or es-419");
+        }
+        // engine, pitch and extra-params are never accepted and silently ignored: Gemini has no
+        // use for any of them. extra-params gets its own message rather than reusing
+        // validateGoogleAudioSettings's, which suggests pitch and speaking-rate.
+        if (provider.getEngine() != null) {
+            throw fault("provider '" + provider.getName() + "' sets engine, which google-gemini does not support");
+        }
+        if (provider.getPitch() != null) {
+            throw fault("provider '" + provider.getName() + "' sets pitch, which google-gemini does not support");
+        }
+        if (provider.getExtraParams() != null && !provider.getExtraParams().isEmpty()) {
+            throw fault("provider '" + provider.getName() + "' sets extra-params " + provider.getExtraParams().keySet()
+                    + ", which google-gemini does not support");
+        }
+        requireInRange(provider, "speaking-rate", provider.getSpeakingRate(), GoogleSpeakingRate.MIN, GoogleSpeakingRate.MAX);
+        if (provider.getStylePrompt() != null) {
+            int length = provider.getStylePrompt().strip().length();
+            if (length > maxTextLength) {
+                throw fault("provider '" + provider.getName() + "' has a style-prompt of length " + length
+                        + " after trimming, exceeding the maximum allowed length of " + maxTextLength);
+            }
+        }
+    }
+
+    private static void requireNonBlank(TtsProviderConfig provider, String key, String value) {
+        if (value == null || value.isBlank()) {
+            throw fault("provider '" + provider.getName() + "' requires " + key);
         }
     }
 

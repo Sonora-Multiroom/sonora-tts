@@ -82,6 +82,16 @@ class DefaultSettingsResolutionTest {
         assertRejected(new RequestedSettings(null, null, null, null, 0.9), "speakingRate");
     }
 
+    @Test
+    void aStylePromptOverrideIsRejectedNamingTheFieldAndProviderType() {
+        assertRejected(new RequestedSettings(null, null, null, null, null, "Calm."), "stylePrompt");
+    }
+
+    @Test
+    void anEmptyStylePromptOverrideIsRejectedToo() {
+        assertRejected(new RequestedSettings(null, null, null, null, null, ""), "stylePrompt");
+    }
+
     private static void assertRejected(RequestedSettings requested, String field) {
         assertThatThrownBy(() -> DefaultSettingsResolution.resolve(config("ryan", null, null), requested))
                 .isInstanceOf(TtsException.class)
