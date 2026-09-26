@@ -369,4 +369,20 @@ class GoogleVoiceResolverTest {
         assertThat(settings.pitchKey()).isNull();
         assertThat(settings.speakingRateKey()).isNull();
     }
+
+    // --- a style prompt is google-gemini only ---------------------------------------------------
+
+    @Test
+    void aRequestStylePromptIsRejectedNamingTheFieldAndType() {
+        assertInvalidRequest(entry(null, "en-US", "en-US-Neural2-C"),
+                new RequestedSettings(null, null, null, null, null, "Calm."))
+                .hasMessage("Field 'stylePrompt' is not supported by provider 'google' of type GOOGLE_CLOUD");
+    }
+
+    @Test
+    void anEmptyRequestStylePromptIsRejectedTooBecauseItAsksForBehaviourThisTypeLacks() {
+        assertInvalidRequest(entry(null, "en-US", "en-US-Neural2-C"),
+                new RequestedSettings(null, null, null, null, null, ""))
+                .hasMessage("Field 'stylePrompt' is not supported by provider 'google' of type GOOGLE_CLOUD");
+    }
 }

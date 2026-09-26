@@ -26,14 +26,24 @@ import java.util.HexFormat;
  * @param pitch        the pitch's cache-key form, {@code null} when neutral or unset
  * @param speakingRate the speaking rate's cache-key form, {@code null} when neutral or unset
  * @param targetFormat the format the cached WAV was converted to
+ * @param stylePrompt  the effective style prompt, already stripped ({@code google-gemini} only);
+ *                      {@code null} when there is none. Last in the hash, and appended only when
+ *                      set, so every pre-004 key — every non-Gemini key, and every Gemini request
+ *                      with no prompt — hashes exactly as before and stays a hit
  */
 public record CacheKey(String text, String providerName, String engineName, String voice, String language,
-                       Double pitch, Double speakingRate, SampleFormat targetFormat) {
+                       Double pitch, Double speakingRate, SampleFormat targetFormat, String stylePrompt) {
 
-    /** A key with no audio adjustments — the 001 shape. */
+    /** A key with no audio adjustments and no prompt — the 001 shape. */
     public CacheKey(String text, String providerName, String engineName, String voice, String language,
                     SampleFormat targetFormat) {
-        this(text, providerName, engineName, voice, language, null, null, targetFormat);
+        this(text, providerName, engineName, voice, language, null, null, targetFormat, null);
+    }
+
+    /** A key with no prompt — 002's shape. */
+    public CacheKey(String text, String providerName, String engineName, String voice, String language,
+                    Double pitch, Double speakingRate, SampleFormat targetFormat) {
+        this(text, providerName, engineName, voice, language, pitch, speakingRate, targetFormat, null);
     }
 
     /** SHA-256 hex of every field; used as the cache filename ({@code <hash>.wav}). */
@@ -50,6 +60,9 @@ public record CacheKey(String text, String providerName, String engineName, Stri
         }
         if (speakingRate != null) {
             combined.append("|r=").append(plain(speakingRate));
+        }
+        if (stylePrompt != null) {
+            combined.append("|s=").append(stylePrompt);
         }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

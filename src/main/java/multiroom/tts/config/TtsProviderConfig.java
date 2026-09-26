@@ -31,11 +31,26 @@ public class TtsProviderConfig {
     private String apiKey;
 
     /**
-     * {@link ProviderType#GOOGLE_CLOUD} only: the path to a service account's JSON key, as Google
-     * issues it. Read once at start-up, so a replaced file takes effect on restart; a relative
-     * path resolves against the working directory. Exactly one of this and {@link #apiKey}.
+     * {@link ProviderType#GOOGLE_CLOUD} and {@link ProviderType#GOOGLE_GEMINI}: the path to a
+     * service account's JSON key, as Google issues it. Read once at start-up, so a replaced file
+     * takes effect on restart; a relative path resolves against the working directory. For
+     * {@code google-cloud}, exactly one of this and {@link #apiKey}; {@code google-gemini}
+     * requires it and forbids {@link #apiKey}.
      */
     private String serviceAccountKeyFile;
+
+    /**
+     * {@link ProviderType#GOOGLE_GEMINI} only: the Gemini-TTS model, for example
+     * {@code gemini-2.5-flash-tts}. Required; not overridable per request.
+     */
+    private String model;
+
+    /**
+     * {@link ProviderType#GOOGLE_GEMINI} only: the default style prompt, sent to Google separately
+     * from the text. Leading and trailing whitespace is removed; the stripped length must not
+     * exceed {@code max-text-length}.
+     */
+    private String stylePrompt;
 
     /** Default voice; null falls back to the provider implementation's own default. */
     private String voice;
@@ -66,8 +81,9 @@ public class TtsProviderConfig {
     private Double pitch;
 
     /**
-     * {@code google-cloud} only: speaking rate, [0.25, 2.0], where 1.0 is the voice's natural
-     * speed. Sent only when set; any other provider type aborts start-up if it is set.
+     * {@code google-cloud} and {@code google-gemini}: speaking rate, [0.25, 2.0], where 1.0 is the
+     * voice's natural speed. Sent only when set; any other provider type aborts start-up if it is
+     * set.
      */
     private Double speakingRate;
 

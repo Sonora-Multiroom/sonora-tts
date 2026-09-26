@@ -3,8 +3,8 @@ package multiroom.tts;
 /**
  * The closed set of error codes the REST contract publishes, one constant per value of the
  * {@code ErrorResponse.error} enum in
- * {@code .specify/archive/003-google-service-account-auth/contracts/tts-rest-api.yaml} (v0.1.2), which
- * supersedes 002's copy and adds no code. From 0.1.1 on that contract's version is the JAR's
+ * {@code specs/004-gemini-tts-provider/contracts/tts-rest-api.yaml} (v0.1.3), which
+ * supersedes 003's copy and adds no code. From 0.1.1 on that contract's version is the JAR's
  * version; it supersedes 001's independently numbered v0.3.0. Nothing below {@code rest} may
  * invent a code outside this set.
  */

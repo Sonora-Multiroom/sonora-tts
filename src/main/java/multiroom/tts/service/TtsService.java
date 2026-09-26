@@ -102,9 +102,11 @@ public class TtsService implements SmartLifecycle {
         // The *Key forms are the provider's decision; they are copied, never
         // interpreted, so this path knows no provider's defaults (Principle IV).
         SynthesisSettings settings = provider.resolveSettings(new RequestedSettings(
-                command.voice(), command.language(), command.engine(), command.pitch(), command.speakingRate()));
+                command.voice(), command.language(), command.engine(), command.pitch(), command.speakingRate(),
+                command.stylePrompt()));
         CacheKey cacheKey = new CacheKey(command.text(), providerName, settings.engine(), settings.voiceKey(),
-                settings.language(), settings.pitchKey(), settings.speakingRateKey(), NATIVE_FORMAT);
+                settings.language(), settings.pitchKey(), settings.speakingRateKey(), NATIVE_FORMAT,
+                settings.stylePrompt());
 
         boolean cacheHit;
         boolean temporaryFile = false;

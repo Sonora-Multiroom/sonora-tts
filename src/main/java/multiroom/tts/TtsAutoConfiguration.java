@@ -13,6 +13,7 @@ import multiroom.tts.config.TtsProviderConfig;
 import multiroom.tts.provider.ProviderRegistry;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.provider.cloud.GoogleCloudTtsProvider;
+import multiroom.tts.provider.cloud.GoogleGeminiTtsProvider;
 import multiroom.tts.provider.cloud.OpenAiTtsProvider;
 import multiroom.tts.provider.cloud.google.ServiceAccountKey;
 import multiroom.tts.provider.local.LocalHttpTtsProvider;
@@ -61,6 +62,8 @@ public class TtsAutoConfiguration {
             case OPENAI -> new OpenAiTtsProvider(config);
             case GOOGLE_CLOUD -> new GoogleCloudTtsProvider(config, properties.getVoiceCatalogue(),
                     serviceAccountKey(config));
+            case GOOGLE_GEMINI -> new GoogleGeminiTtsProvider(config, properties.getVoiceCatalogue(),
+                    serviceAccountKey(config), properties.getMaxTextLength());
             case PIPER -> new PiperTtsProvider(config);
             case LOCAL_HTTP -> new LocalHttpTtsProvider(config);
         };

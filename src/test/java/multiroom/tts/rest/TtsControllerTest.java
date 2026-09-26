@@ -205,4 +205,37 @@ class TtsControllerTest {
         assertThat(captor.getValue().pitch()).isNull();
         assertThat(captor.getValue().speakingRate()).isNull();
     }
+
+    @Test
+    void aStylePromptReachesTheCommandUnchanged() throws Exception {
+        when(ttsService.speak(any())).thenReturn(new AnnounceResult(UUID.randomUUID(), false, 1));
+
+        mockMvc.perform(post("/api/tts/speak")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"text":"Hi","targetName":"kitchen","targetType":"SINGLE_OUTPUT",
+                                 "providerName":"gemini","stylePrompt":"Calm."}
+                                """))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<AnnounceCommand> captor = ArgumentCaptor.forClass(AnnounceCommand.class);
+        verify(ttsService).speak(captor.capture());
+        assertThat(captor.getValue().stylePrompt()).isEqualTo("Calm.");
+    }
+
+    @Test
+    void anOmittedStylePromptIsNull() throws Exception {
+        when(ttsService.speak(any())).thenReturn(new AnnounceResult(UUID.randomUUID(), false, 1));
+
+        mockMvc.perform(post("/api/tts/speak")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"text":"Hi","targetName":"kitchen","targetType":"SINGLE_OUTPUT"}
+                                """))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<AnnounceCommand> captor = ArgumentCaptor.forClass(AnnounceCommand.class);
+        verify(ttsService).speak(captor.capture());
+        assertThat(captor.getValue().stylePrompt()).isNull();
+    }
 }

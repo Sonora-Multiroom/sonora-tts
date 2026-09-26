@@ -45,7 +45,7 @@ public class TtsController {
         AnnounceResult result = ttsService.speak(new AnnounceCommand(
                 request.text(), request.targetName(), request.targetType(),
                 request.providerName(), request.voice(), request.language(),
-                request.engine(), request.pitch(), request.speakingRate()));
+                request.engine(), request.pitch(), request.speakingRate(), request.stylePrompt()));
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(new SpeakAcceptedResponse(result.announcementId(), result.cacheHit(), result.queueDepth()));
     }

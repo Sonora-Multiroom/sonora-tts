@@ -296,7 +296,59 @@ class GoogleVoiceCatalogueTest {
     void listMatchesAnUnrecognizedEngineBySegment() {
         List<CatalogueVoice> voices = catalogue.list(null, "polyglot", BUDGET);
 
-        assertThat(voices).containsExactly(new CatalogueVoice("en-US-Polyglot-1", "1", "Polyglot", "en-US"));
+        assertThat(voices).containsExactly(new CatalogueVoice("en-US-Polyglot-1", "1", "Polyglot", "en-US", "MALE"));
+    }
+
+    // --- 004: gender and the Gemini selector ----------------------------------------------------
+
+    private static final String GEMINI_MODEL = "gemini-2.5-flash-tts";
+
+    /** Full and bare names side by side, as the 2026-09-26 live call returned them. */
+    private static final String MIXED = """
+            {"voices": [
+              {"languageCodes": ["uk-UA"], "name": "uk-UA-Chirp3-HD-Kore", "ssmlGender": "FEMALE"},
+              {"languageCodes": ["en-US"], "name": "Kore", "ssmlGender": "FEMALE"},
+              {"languageCodes": ["en-US"], "name": "achird", "ssmlGender": "MALE"},
+              {"languageCodes": ["en-US"], "name": "Kore1", "ssmlGender": "FEMALE"},
+              {"languageCodes": ["en-US"], "name": "Zephyr"}
+            ]}
+            """;
+
+    private GoogleVoiceCatalogue geminiCatalogue() {
+        return new GoogleVoiceCatalogue("gemini", new VoiceCatalogueProperties(), clock, fetcher,
+                GoogleVoiceCatalogue.geminiSelector(GEMINI_MODEL));
+    }
+
+    @Test
+    void theDefaultSelectorKeepsFullNamesOnlyAndReadsTheirGender() {
+        fetcher.json = MIXED;
+
+        assertThat(catalogue.list(null, null, BUDGET))
+                .containsExactly(new CatalogueVoice("uk-UA-Chirp3-HD-Kore", "Kore", "Chirp3-HD", "uk-UA", "FEMALE"));
+    }
+
+    @Test
+    void aVoiceWithoutSsmlGenderHasNoGender() {
+        fetcher.json = "{\"voices\": [{\"name\": \"uk-UA-Chirp3-HD-Kore\"}]}";
+
+        assertThat(catalogue.list(null, null, BUDGET)).singleElement()
+                .satisfies(voice -> assertThat(voice.gender()).isNull());
+    }
+
+    @Test
+    void theGeminiSelectorKeepsBareNamesCanonicalizedWithTheModelAndNoLanguage() {
+        fetcher.json = MIXED;
+
+        assertThat(geminiCatalogue().list(null, null, BUDGET)).containsExactly(
+                new CatalogueVoice("Achird", "Achird", GEMINI_MODEL, null, "MALE"),
+                new CatalogueVoice("Kore", "Kore", GEMINI_MODEL, null, "FEMALE"),
+                new CatalogueVoice("Zephyr", "Zephyr", GEMINI_MODEL, null, null));
+    }
+
+    @Test
+    void theGeminiSelectorOverThePublishedFixtureKeepsOnlyTheBareVoice() {
+        assertThat(geminiCatalogue().list(null, null, BUDGET))
+                .containsExactly(new CatalogueVoice("Achird", "Achird", GEMINI_MODEL, null, "MALE"));
     }
 
     @Test

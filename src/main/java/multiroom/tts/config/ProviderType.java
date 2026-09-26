@@ -6,6 +6,7 @@ package multiroom.tts.config;
 public enum ProviderType {
     OPENAI,
     GOOGLE_CLOUD,
+    GOOGLE_GEMINI,
     PIPER,
     LOCAL_HTTP
 }

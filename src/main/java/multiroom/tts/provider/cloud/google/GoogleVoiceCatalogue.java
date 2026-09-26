@@ -17,13 +17,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
 
 /**
- * One {@code google-cloud} entry's in-memory copy of {@code GET v1/voices} — the spec's
- * <em>Voice Catalogue</em>. Never fetched at construction:
- * the first need fetches it, and it is then trusted for {@code ttl}.
+ * One Google entry's in-memory copy of {@code GET v1/voices}: 002's <em>Voice Catalogue</em> for a
+ * {@code google-cloud} entry, 004's <em>Gemini Voice List</em> for a {@code google-gemini} one. A
+ * voice selector decides which published voices the entry keeps and how it reads them. Never
+ * fetched at construction: the first need fetches it, and it is then trusted for {@code ttl}.
  *
  * <p>A failed fetch is remembered for {@code failure-backoff}, during which nothing is fetched and
  * the answer is {@link CheckResult.Unavailable}, so an outage costs one slow request per period.
@@ -38,9 +41,12 @@ public final class GoogleVoiceCatalogue {
     private static final Logger log = LoggerFactory.getLogger(GoogleVoiceCatalogue.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** Sorts by language, then engine, then short name, as the listing contract publishes. */
+    /**
+     * Sorts by language, then engine, then short name, as the listing contract publishes. Gemini
+     * voices have no language and share one engine, so they sort by name.
+     */
     private static final Comparator<CatalogueVoice> ORDER = Comparator
-            .comparing(CatalogueVoice::language, String.CASE_INSENSITIVE_ORDER)
+            .comparing(CatalogueVoice::language, Comparator.nullsFirst(String.CASE_INSENSITIVE_ORDER))
             .thenComparing(CatalogueVoice::engine, String.CASE_INSENSITIVE_ORDER)
             .thenComparing(CatalogueVoice::shortName, String.CASE_INSENSITIVE_ORDER);
 
@@ -81,19 +87,47 @@ public final class GoogleVoiceCatalogue {
     private final Duration failureBackoff;
     private final Clock clock;
     private final CatalogueFetcher fetcher;
+    private final Function<JsonNode, Optional<CatalogueVoice>> selector;
     private final ReentrantLock fetchLock = new ReentrantLock();
 
     private volatile Snapshot snapshot;
     private volatile Instant failedAt;
     private volatile String failureReason;
 
+    /** A {@code google-cloud} entry's catalogue: full voice names only. */
     public GoogleVoiceCatalogue(String providerName, VoiceCatalogueProperties properties, Clock clock,
                                 CatalogueFetcher fetcher) {
+        this(providerName, properties, clock, fetcher, CatalogueVoice::fromJson);
+    }
+
+    /**
+     * @param selector reads one {@code voices[]} element into a voice this entry keeps, or empty to
+     *                 skip it
+     */
+    public GoogleVoiceCatalogue(String providerName, VoiceCatalogueProperties properties, Clock clock,
+                                CatalogueFetcher fetcher, Function<JsonNode, Optional<CatalogueVoice>> selector) {
         this.providerName = providerName;
         this.ttl = properties.getTtl();
         this.failureBackoff = properties.getFailureBackoff();
         this.clock = clock;
         this.fetcher = fetcher;
+        this.selector = selector;
+    }
+
+    /**
+     * A {@code google-gemini} entry's selector. Google publishes Gemini voices as bare names
+     * ({@code Kore}), beside the full names of the classic voices: this keeps the names of the
+     * Gemini voice form, canonicalized, with {@code model} as their engine and no language.
+     */
+    public static Function<JsonNode, Optional<CatalogueVoice>> geminiSelector(String model) {
+        return voice -> {
+            String name = voice.path("name").asText(null);
+            if (!GeminiVoice.isWellFormed(name)) {
+                return Optional.empty();
+            }
+            String canonical = GeminiVoice.parse(name).name();
+            return Optional.of(new CatalogueVoice(canonical, canonical, model, null, CatalogueVoice.gender(voice)));
+        };
     }
 
     /**
@@ -199,7 +233,7 @@ public final class GoogleVoiceCatalogue {
     private boolean fetch(Duration budget) {
         log.debug("multiroom-tts: fetching the voice catalogue of provider '{}'", providerName);
         try {
-            snapshot = parse(fetcher.fetch(budget), clock.instant());
+            snapshot = parse(fetcher.fetch(budget), clock.instant(), selector);
             failedAt = null;
             failureReason = null;
             return true;
@@ -212,15 +246,15 @@ public final class GoogleVoiceCatalogue {
         }
     }
 
-    private static Snapshot parse(String json, Instant fetchedAt) throws IOException {
+    private static Snapshot parse(String json, Instant fetchedAt,
+                                  Function<JsonNode, Optional<CatalogueVoice>> selector) throws IOException {
         JsonNode voices = MAPPER.readTree(json).path("voices");
         if (!voices.isArray()) {
             throw new IOException("the response has no voices array");
         }
         Map<String, CatalogueVoice> byFoldedName = new LinkedHashMap<>();
         for (JsonNode voice : voices) {
-            CatalogueVoice.fromName(voice.path("name").asText(null))
-                    .ifPresent(parsed -> byFoldedName.put(fold(parsed.fullName()), parsed));
+            selector.apply(voice).ifPresent(parsed -> byFoldedName.put(fold(parsed.fullName()), parsed));
         }
         return new Snapshot(fetchedAt, Map.copyOf(byFoldedName));
     }

@@ -101,7 +101,7 @@ moves from `specs/` to `.specify/archive/`.
 | `001-tts-extension` | The extension itself: announcements to an output or group, four providers (OpenAI, Google Cloud, Piper, local HTTP), on-disk LRU cache, per-target playback queue, `/api/tts/**` | 0.1.0 | [.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) |
 | `002-google-voice-selection` | Google voices by full name or engine + language + short name, checked against a per-entry voice catalogue (`INVALID_VOICE` lists the alternatives); Google's error message surfaced; pitch and speaking rate; `GET /api/tts/providers/{name}/voices` | 0.1.1 | [.specify/archive/002-google-voice-selection/](.specify/archive/002-google-voice-selection/) |
 | `003-google-service-account-auth` | `service-account-key-file` as the alternative to `api-key` for `google-cloud`: a JDK-only JWT exchange for per-entry bearer tokens, validated once at start-up, no new error code | 0.1.2 | [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) |
-| `004-gemini-tts-provider` | Gemini TTS provider | — | [specs/004-gemini-tts-provider/](specs/004-gemini-tts-provider/) — in progress |
+| `004-gemini-tts-provider` | A `google-gemini` provider type through Google's Text-to-Speech endpoint with a service account (route A): model + voice + language, a style prompt per entry and per request, speaking rate honoured (pitch rejected), start-up faults, a default-provider cost warning, and Gemini voice listing from Google's list (with gender, also added for `google-cloud`) | 0.1.3 | [specs/004-gemini-tts-provider/](specs/004-gemini-tts-provider/) — merged, not yet archived |
 
 Add a row when a feature merges, and change its path when it is archived.
 

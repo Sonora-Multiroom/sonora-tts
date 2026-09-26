@@ -24,12 +24,15 @@ public final class DefaultSettingsResolution {
     /**
      * @throws TtsException {@link TtsErrorCode#INVALID_REQUEST} if the request overrides
      *                      {@code engine}, {@code pitch} or {@code speakingRate}, which only
-     *                      {@code google-cloud} supports
+     *                      {@code google-cloud} supports, or sets a {@code stylePrompt}, which only
+     *                      {@code google-gemini} does — even an empty one, since it asks for prompt
+     *                      behaviour this type does not have
      */
     public static SynthesisSettings resolve(TtsProviderConfig config, RequestedSettings requested) {
         rejectIfSet(config, "engine", requested.engine());
         rejectIfSet(config, "pitch", requested.pitch());
         rejectIfSet(config, "speakingRate", requested.speakingRate());
+        rejectIfSet(config, "stylePrompt", requested.stylePrompt());
 
         String voice = requested.voice() != null ? requested.voice() : config.getVoice();
         String language = requested.language() != null ? requested.language()

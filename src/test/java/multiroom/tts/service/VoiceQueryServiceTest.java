@@ -36,15 +36,20 @@ class VoiceQueryServiceTest {
         return config;
     }
 
+    private TtsProvider geminiProvider;
+
     @BeforeEach
     void setUp() {
         googleProvider = mock(TtsProvider.class, withSettings().extraInterfaces(VoiceCatalogueProvider.class));
         piperProvider = mock(TtsProvider.class);
+        geminiProvider = mock(TtsProvider.class, withSettings().extraInterfaces(VoiceCatalogueProvider.class));
         TtsProperties properties = new TtsProperties();
         properties.setProviders(List.of(entry("google", ProviderType.GOOGLE_CLOUD),
-                entry("piper-local", ProviderType.LOCAL_HTTP)));
+                entry("piper-local", ProviderType.LOCAL_HTTP),
+                entry("gemini", ProviderType.GOOGLE_GEMINI)));
         service = new VoiceQueryService(properties,
-                new ProviderRegistry(Map.of("google", googleProvider, "piper-local", piperProvider), "google"));
+                new ProviderRegistry(Map.of("google", googleProvider, "piper-local", piperProvider,
+                        "gemini", geminiProvider), "google"));
     }
 
     @Test
@@ -72,6 +77,24 @@ class VoiceQueryServiceTest {
                 .hasMessage("No provider configured with name 'gogle'")
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.PROVIDER_NOT_FOUND);
+    }
+
+    @Test
+    void aGeminiEntrysVoicesAreDelegatedToItsCatalogue() {
+        List<CatalogueVoice> voices = List.of(
+                new CatalogueVoice("Kore", "Kore", "gemini-2.5-flash-tts", null, "FEMALE"));
+        when(((VoiceCatalogueProvider) geminiProvider).listVoices("uk-UA", null)).thenReturn(voices);
+
+        assertThat(service.listVoices("gemini", "uk-UA", null)).isEqualTo(voices);
+    }
+
+    @Test
+    void aMalformedLanguageFilterForAGeminiEntryIsACallerErrorWithNoCatalogueCall() {
+        assertThatThrownBy(() -> service.listVoices("gemini", "ukrainian", null))
+                .isInstanceOf(TtsException.class)
+                .extracting(e -> ((TtsException) e).getErrorCode())
+                .isEqualTo(TtsErrorCode.INVALID_REQUEST);
+        verifyNoInteractions(geminiProvider);
     }
 
     @Test

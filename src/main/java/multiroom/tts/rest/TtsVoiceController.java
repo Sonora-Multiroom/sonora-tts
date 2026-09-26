@@ -13,9 +13,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code GET /api/tts/providers/{providerName}/voices[?language=&engine=]}. Lists from the
- * same in-memory catalogue that validates {@code voice} on {@code POST /api/tts/speak}, so a listed
- * voice is an accepted voice.
+ * {@code GET /api/tts/providers/{providerName}/voices[?language=&engine=]}. For a
+ * {@code google-cloud} entry it lists from the same in-memory catalogue that validates
+ * {@code voice} on {@code POST /api/tts/speak}, so a listed voice is an accepted voice. For a
+ * {@code google-gemini} entry it lists the Gemini voices Google publishes, which announcing does
+ * not check against.
  */
 @RestController
 @RequestMapping("/api/tts/providers")
@@ -30,7 +32,8 @@ public class TtsVoiceController {
     @GetMapping("/{providerName}/voices")
     @Operation(summary = "List the voices a provider offers", operationId = "listVoices")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Matching voices, sorted by language, engine, then short name",
+            @ApiResponse(responseCode = "200", description = "Matching voices; google-cloud: sorted by language, "
+                    + "engine, then short name; google-gemini: sorted by name",
                     content = @Content(schema = @Schema(implementation = VoiceListResponse.class))),
             @ApiResponse(responseCode = "400", description = "Unknown provider, a type that does not list voices, or a malformed filter",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),

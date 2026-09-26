@@ -1,0 +1,592 @@
+openapi: 3.0.3
+info:
+  title: Multiroom TTS Extension API
+  description: |
+    REST trigger interface for the TTS (Text-to-Speech) extension.
+    Accepts announcement requests, synthesizes speech via a configured provider,
+    and plays the result on a target audio output or output group.
+
+    Served by `multiroom-tts` itself, on the application's single port, mapped by core's one
+    DispatcherServlet. These paths are generated into the shared `/api-docs` document with no
+    change to `multiroom-rest`, because `019-extension-shared-classloader` widened
+    `springdoc.packages-to-scan` to `multiroom`.
+
+    The `/api/tts/**` prefix is this module's own. `/api/v2/**` is deliberately NOT used: it is
+    `multiroom-rest`'s published contract with two independently released consumers outside this
+    repository, and a second module contributing paths there could break them.
+
+    Authentication is delegated to whatever guards the application's HTTP surface — see FR-026.
+
+    **Versioning**: from 0.1.1 on, this contract's version is the extension JAR's version
+    (`multiroom-tts` `<version>` in `pom.xml`). 001's contract was numbered independently (0.3.0)
+    and is superseded by this one, although this number is lower: it now tracks the JAR.
+
+    **0.1.1 (feature 002-google-voice-selection)**: `SpeakRequest` gains `engine`, `pitch` and
+    `speakingRate`; `GET /api/tts/providers/{providerName}/voices` is new; `ErrorResponse.error`
+    gains `INVALID_VOICE` (400) and `VOICE_CATALOGUE_UNAVAILABLE` (503). Every change is additive:
+    a client written against 001's contract keeps working unchanged.
+
+    **0.1.2 (feature 003-google-service-account-auth)**: no change to any path, field or error
+    code. A `google-cloud` entry may now authenticate with a service account key; a failure to
+    obtain its access token is reported as `PROVIDER_ERROR`, `PROVIDER_TIMEOUT` or
+    `PROVIDER_RATE_LIMITED`, with Google's explanation in `message`.
+
+    **0.1.3 (feature 004-gemini-tts-provider)**: a new provider type, `google-gemini`.
+    `SpeakRequest` gains `stylePrompt` (`google-gemini` only); `speakingRate` is now accepted by
+    `google-gemini` as well; `engine` and `pitch` are rejected for it. No new path or error code.
+    `GET /api/tts/providers/{providerName}/voices` now lists the Gemini voices of a
+    `google-gemini` entry. `VoiceDescriptor` gains `gender`, and its `language` is no longer
+    required: a Gemini voice has none. Every change is additive for a client of a `google-cloud`
+    entry, which still receives every field it received under 0.1.2.
+  version: 0.1.3
+
+servers:
+  - url: http://localhost:8080
+    description: Local multiroom instance — the single unified port
+
+tags:
+  - name: Announcements
+    description: Trigger TTS announcements
+  - name: Cache
+    description: Manage the synthesized audio cache
+  - name: Voices
+    description: Discover the voices a provider offers
+
+paths:
+  /api/tts/speak:
+    post:
+      tags: [Announcements]
+      summary: Trigger a TTS announcement
+      description: |
+        Synthesizes the provided text using the configured TTS provider and plays
+        the resulting audio on the specified target output or output group.
+
+        - If `providerName` is omitted, the default provider is used.
+        - If a cached audio entry exists for the same text + provider + voice + language
+          (+ pitch + speaking rate for `google-cloud`; + model + speaking rate + style prompt
+          for `google-gemini`), no synthesis call is made. For
+          `google-cloud`, "same voice" means the same resolved full name, however it was spelled:
+          `charon` + `chirp3-hd` + `uk-UA` and `uk-UA-Chirp3-HD-Charon` share one entry.
+        - For `google-cloud`, a voice is checked against Google's published voice catalogue
+          before synthesis (on a cache miss). An unknown voice is `400 INVALID_VOICE` listing the
+          alternatives. If the catalogue cannot be reached, the check is skipped and synthesis is
+          attempted anyway. This also applies when the voice comes from the provider entry's own
+          configuration: a configured voice that Google does not publish is reported as
+          `INVALID_VOICE` too, and the caller can name a valid voice to proceed.
+        - The announcement is queued behind any currently playing announcement on the target.
+        - Synthesis, format conversion and the cache write happen **before** this call returns;
+          only playback is asynchronous. A `202` therefore means the audio exists and is ready,
+          which is why the response can report `cacheHit`, and why a provider failure is a `503`
+          on this call rather than a silent drop after acceptance.
+      operationId: speak
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpeakRequest'
+            examples:
+              singleRoom:
+                summary: Announce to a single room
+                value:
+                  text: "Dinner is ready"
+                  targetName: "living-room"
+                  targetType: SINGLE_OUTPUT
+              allRooms:
+                summary: Announce to all rooms via an output group
+                value:
+                  text: "Motion detected in garden"
+                  targetName: "all-rooms"
+                  targetType: OUTPUT_GROUP
+              withProviderOverride:
+                summary: Use a specific provider
+                value:
+                  text: "This message uses the local provider"
+                  targetName: "kitchen"
+                  targetType: SINGLE_OUTPUT
+                  providerName: "piper-local"
+                  voice: "en_US-ryan-medium"
+                  language: "en-US"
+              googleFullVoiceName:
+                summary: Google voice by full name — the language comes from the name
+                value:
+                  text: "Мені тринадцятий минало. Я пас ягнята за селом."
+                  targetName: "office"
+                  targetType: SINGLE_OUTPUT
+                  providerName: "google"
+                  voice: "uk-UA-Chirp3-HD-Charon"
+              googleShortVoiceName:
+                summary: Google voice by short name, engine override, slower speech
+                value:
+                  text: "Dinner is ready"
+                  targetName: "kitchen"
+                  targetType: SINGLE_OUTPUT
+                  providerName: "google"
+                  engine: "neural2"
+                  voice: "c"
+                  language: "en-US"
+                  speakingRate: 0.9
+              geminiStylePrompt:
+                summary: Gemini voice with a per-announcement style prompt
+                value:
+                  text: "Someone is at the front door"
+                  targetName: "all-rooms"
+                  targetType: OUTPUT_GROUP
+                  providerName: "gemini"
+                  voice: "Kore"
+                  stylePrompt: "Announce this clearly and with a little urgency."
+              geminiNoPrompt:
+                summary: Gemini voice with the entry's default style prompt turned off
+                value:
+                  text: "Dinner is ready"
+                  targetName: "kitchen"
+                  targetType: SINGLE_OUTPUT
+                  providerName: "gemini"
+                  stylePrompt: ""
+      responses:
+        '202':
+          description: Request accepted; playback is queued and will occur asynchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeakAcceptedResponse'
+        '400':
+          description: Invalid request (empty text, text too long, unknown target, unknown provider)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emptyText:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Text must not be blank"
+                textTooLong:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Text length 632 exceeds maximum allowed length of 500"
+                unknownTarget:
+                  value:
+                    error: TARGET_NOT_FOUND
+                    message: "No output or output group named 'bedroom' found"
+                unknownProvider:
+                  value:
+                    error: PROVIDER_NOT_FOUND
+                    message: "No provider configured with name 'my-provider'"
+                invalidVoice:
+                  value:
+                    error: INVALID_VOICE
+                    message: "Voice 'charn' is not available for Chirp3-HD / uk-UA. Available: Achernar, Achird, Algenib, Algieba, Alnilam, Aoede, Autonoe, Callirrhoe, Charon, Despina, Enceladus, Erinome, Fenrir, Gacrux, Iapetus, Kore, Laomedeia, Leda, Orus, Puck, Pulcherrima, Rasalgethi, Sadachbia, Sadaltager, Schedar, Sulafat, Umbriel, Vindemiatrix, Zephyr, Zubenelgenubi"
+                languageConflict:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Language 'en-US' contradicts voice 'uk-UA-Chirp3-HD-Charon', whose language is 'uk-UA'"
+                engineConflict:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Engine 'Wavenet' contradicts voice 'uk-UA-Chirp3-HD-Charon', whose engine is 'Chirp3-HD'"
+                unknownEngine:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Unknown engine 'chirp4'. Supported: Standard, Wavenet, Neural2, Studio, Chirp-HD, Chirp3-HD"
+                speakingRateOutOfRange:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "speakingRate 3.0 is outside the allowed range [0.25, 2.0]"
+                googleOnlyField:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Field 'pitch' is not supported by provider 'piper-local' of type LOCAL_HTTP"
+                stylePromptWrongType:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Field 'stylePrompt' is not supported by provider 'google' of type GOOGLE_CLOUD"
+                stylePromptTooLong:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "stylePrompt length 612 exceeds maximum allowed length of 500"
+        '503':
+          description: |
+            TTS provider unavailable, returned an error, or returned audio in a format the
+            system's shared converter refuses. None of these is fixable by changing the request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                providerTimeout:
+                  value:
+                    error: PROVIDER_TIMEOUT
+                    message: "Provider 'openai' did not respond within 10 seconds"
+                providerRateLimit:
+                  value:
+                    error: PROVIDER_RATE_LIMITED
+                    message: "Provider 'openai' reported rate limit exceeded (HTTP 429)"
+                googleRejection:
+                  summary: Google's own explanation is appended to the status (FR-001)
+                  value:
+                    error: PROVIDER_ERROR
+                    message: "Provider 'google' returned HTTP 400: Requested language code 'en-US' doesn't match the voice's language code 'uk-UA'."
+
+  /api/tts/providers/{providerName}/voices:
+    get:
+      tags: [Voices]
+      summary: List the voices a provider offers
+      description: |
+        Lists the voices of a `google-cloud` provider from the same in-memory catalogue that
+        validates `voice` on `POST /api/tts/speak`, so a listed voice is an accepted voice.
+
+        - The catalogue is fetched on first need and remembered (default 24 h). The first call
+          after start-up or expiry may therefore contact Google.
+        - Voices of engines this extension does not recognize (for example `Polyglot`, `News`)
+          are listed too, under their engine segment as published, and `engine` filters on it.
+        - Filters are case-insensitive. `engine` also accepts the usual aliases
+          (`wavenet`/`WaveNet`, `chirp3-hd`/`Chirp3-HD`).
+
+        For a `google-gemini` entry, lists the Gemini voices in the same Google voice list, fetched
+        and remembered the same way, per entry:
+
+        - Each voice has its name as both `shortName` and `fullName`, the entry's model as
+          `engine`, its `gender`, and **no** `language`: Gemini voices are not tied to one.
+        - `language` is checked for form but does not narrow the list.
+        - `engine` is `400 INVALID_REQUEST`: the model is fixed by the entry.
+        - The list is for choosing a voice only. Announcing does not check the voice against it,
+          and Google's list is not per model, so a listed voice may still be refused by the
+          entry's model (`503 PROVIDER_ERROR`).
+        - Sorted by name.
+
+        Other provider types do not support listing (`400 INVALID_REQUEST`).
+      operationId: listVoices
+      parameters:
+        - name: providerName
+          in: path
+          required: true
+          schema:
+            type: string
+          example: google
+        - name: language
+          in: query
+          required: false
+          description: Language-region tag (`uk-UA`, `cmn-CN`, `es-419`), case-insensitive
+          schema:
+            type: string
+          example: uk-UA
+        - name: engine
+          in: query
+          required: false
+          description: Engine name or alias, or an unrecognized engine segment as published
+          schema:
+            type: string
+          example: chirp3-hd
+      responses:
+        '200':
+          description: |
+            Matching voices; `google-cloud`: sorted by language, engine, then short name;
+            `google-gemini`: sorted by name. May be empty.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceListResponse'
+              examples:
+                googleCloud:
+                  summary: A google-cloud entry, language=uk-UA&engine=chirp3-hd
+                  value:
+                    providerName: google
+                    voices:
+                      - { shortName: Charon, fullName: uk-UA-Chirp3-HD-Charon, engine: Chirp3-HD, language: uk-UA, gender: MALE }
+                      - { shortName: Kore, fullName: uk-UA-Chirp3-HD-Kore, engine: Chirp3-HD, language: uk-UA, gender: FEMALE }
+                googleGemini:
+                  summary: A google-gemini entry, with or without language=uk-UA (first entries)
+                  value:
+                    providerName: gemini
+                    voices:
+                      - { shortName: Achernar, fullName: Achernar, engine: gemini-2.5-flash-tts, gender: FEMALE }
+                      - { shortName: Achird, fullName: Achird, engine: gemini-2.5-flash-tts, gender: MALE }
+        '400':
+          description: Unknown provider, a provider type that does not list voices, or a malformed filter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownProvider:
+                  value:
+                    error: PROVIDER_NOT_FOUND
+                    message: "No provider configured with name 'gogle'"
+                unsupportedType:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Provider 'piper-local' of type LOCAL_HTTP does not support voice listing"
+                malformedLanguage:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Language 'ukrainian' is not a language-region tag such as uk-UA, cmn-CN or es-419"
+                geminiEngineFilter:
+                  value:
+                    error: INVALID_REQUEST
+                    message: "Filter 'engine' is not supported by provider 'gemini' of type GOOGLE_GEMINI"
+        '503':
+          description: The voice catalogue cannot be fetched now (or a recent failure is in back-off)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                catalogueUnavailable:
+                  value:
+                    error: VOICE_CATALOGUE_UNAVAILABLE
+                    message: "The voice catalogue of provider 'google' is unavailable: HTTP 403: API key not valid. Please pass a valid API key."
+
+  /api/tts/cache:
+    delete:
+      tags: [Cache]
+      summary: Clear the audio cache
+      description: |
+        Deletes all cached audio files and resets the cache index.
+        Subsequent requests for any text will trigger fresh synthesis.
+        If `providerName` is specified, only entries for that provider are cleared.
+      operationId: clearCache
+      parameters:
+        - name: providerName
+          in: query
+          required: false
+          description: If specified, only clear cache entries for this provider
+          schema:
+            type: string
+          example: openai
+      responses:
+        '204':
+          description: Cache cleared successfully
+        '400':
+          description: Unknown provider name specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tts/cache/stats:
+    get:
+      tags: [Cache]
+      summary: Get audio cache statistics
+      description: Returns current cache size and entry count for observability.
+      operationId: getCacheStats
+      responses:
+        '200':
+          description: Cache statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStatsResponse'
+
+components:
+  schemas:
+    SpeakRequest:
+      type: object
+      required:
+        - text
+        - targetName
+        - targetType
+      properties:
+        text:
+          type: string
+          description: The text to synthesize and play
+          minLength: 1
+          maxLength: 500
+          example: "Dinner is ready"
+        targetName:
+          type: string
+          description: Name of the target audio output or output group
+          example: "living-room"
+        targetType:
+          type: string
+          description: |
+            Whether the target is a single output or an output group. These are the values of
+            the published API enum `multiroom.api.model.TargetType`, reused verbatim rather
+            than TTS defining its own.
+          enum: [SINGLE_OUTPUT, OUTPUT_GROUP]
+          example: SINGLE_OUTPUT
+        providerName:
+          type: string
+          description: Provider name override. If omitted, the default provider is used.
+          example: "openai"
+        voice:
+          type: string
+          description: |
+            Provider-specific voice identifier override. If omitted, the provider default is used.
+
+            For `google-cloud`, either a **full name** (`uk-UA-Chirp3-HD-Charon`, which carries
+            its own language and engine) or a **short name** (`Charon`, `D`), completed from the
+            resolved engine and language. Case-insensitive.
+
+            For `google-gemini`, a Gemini voice name such as `Kore`: one word of letters, any
+            case (`kore` and `KORE` are the same voice and share a cache entry). Not checked
+            against a catalogue, although the entry lists its voices; a voice Google does not
+            know, or one the entry's model lacks, is `503 PROVIDER_ERROR` with Google's
+            explanation.
+          example: "alloy"
+        language:
+          type: string
+          description: |
+            BCP 47 language tag override. If omitted, the provider default is used.
+
+            For `google-cloud`, resolved as: this field, then the language of a full voice name,
+            then the provider entry's default language (its configured `language`, or else the
+            language of its configured full voice), then `en-US` (only when no voice is set
+            anywhere). Contradicting a full voice name's language is `400 INVALID_REQUEST`.
+
+            For `google-gemini`, this field or else the entry's required `language`. It must be a
+            language-region tag such as `uk-UA`, or the request is `400 INVALID_REQUEST`.
+          example: "en-US"
+        engine:
+          type: string
+          description: |
+            **`google-cloud` only** (any other provider type, `google-gemini` included:
+            `400 INVALID_REQUEST`). The voice engine used to complete a short `voice`: one of `Standard`, `Wavenet`, `Neural2`,
+            `Studio`, `Chirp-HD`, `Chirp3-HD`, case- and separator-insensitive. If omitted, the
+            provider entry's default engine is used. Contradicting a full voice name's engine is
+            `400 INVALID_REQUEST`. Requires a voice (here or configured).
+          example: "chirp3-hd"
+        pitch:
+          type: number
+          format: double
+          minimum: -20.0
+          maximum: 20.0
+          description: |
+            **`google-cloud` only** (`google-gemini`: `400 INVALID_REQUEST`, because Google
+            ignores pitch for Gemini voices). Semitones relative to the voice's natural pitch. Overrides
+            the provider entry's `pitch` for this announcement. Not every engine supports it
+            (Google documents no pitch control for `Chirp3-HD`); the value is sent as given, and
+            any rejection by Google is reported with Google's explanation.
+          example: -2.0
+        speakingRate:
+          type: number
+          format: double
+          minimum: 0.25
+          maximum: 2.0
+          description: |
+            **`google-cloud` and `google-gemini` only.** 1.0 is the voice's natural speed.
+            Overrides the provider entry's `speaking-rate` for this announcement.
+          example: 1.1
+        stylePrompt:
+          type: string
+          description: |
+            **`google-gemini` only** (any other provider type: `400 INVALID_REQUEST`). A
+            natural-language instruction for how the text is delivered, sent to Google separately
+            from the text. Leading and trailing whitespace is removed; the rest is used exactly
+            as given and is part of the cache identity.
+
+            - Omitted: the provider entry's default `style-prompt` applies, if it has one.
+            - Empty (or only whitespace): no style prompt for this announcement, even if the
+              entry has a default.
+            - Longer than the configured maximum text length after trimming:
+              `400 INVALID_REQUEST`.
+          example: "Say this calmly and warmly."
+
+    SpeakAcceptedResponse:
+      type: object
+      properties:
+        announcementId:
+          type: string
+          format: uuid
+          description: Unique identifier for this announcement (for logging correlation)
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        cacheHit:
+          type: boolean
+          description: Whether the audio was served from cache (true) or freshly synthesized (false)
+          example: true
+        queueDepth:
+          type: integer
+          description: Number of announcements now queued for the target (including this one)
+          example: 1
+
+    CacheStatsResponse:
+      type: object
+      properties:
+        totalEntries:
+          type: integer
+          description: Number of cached audio files
+          example: 42
+        totalSizeBytes:
+          type: integer
+          format: int64
+          description: Total size of cached audio files in bytes
+          example: 15728640
+        maxSizeBytes:
+          type: integer
+          format: int64
+          description: Configured maximum cache size in bytes
+          example: 524288000
+        entriesByProvider:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Cache entry count per provider name
+          example:
+            openai: 35
+            piper-local: 7
+
+    VoiceListResponse:
+      type: object
+      required: [providerName, voices]
+      properties:
+        providerName:
+          type: string
+          example: google
+        voices:
+          type: array
+          items:
+            $ref: '#/components/schemas/VoiceDescriptor'
+
+    VoiceDescriptor:
+      type: object
+      required: [shortName, fullName, engine]
+      properties:
+        shortName:
+          type: string
+          description: |
+            What to pass as `voice` together with `engine` and `language` (`google-cloud`), or on
+            its own (`google-gemini`)
+          example: Charon
+        fullName:
+          type: string
+          description: Google's own name, usable as `voice` on its own
+          example: uk-UA-Chirp3-HD-Charon
+        engine:
+          type: string
+          description: |
+            `google-cloud`: canonical engine spelling, or the segment as published for an
+            unrecognized engine. `google-gemini`: the entry's model
+          example: Chirp3-HD
+        language:
+          type: string
+          description: Always present for `google-cloud`; absent for `google-gemini`
+          example: uk-UA
+        gender:
+          type: string
+          description: Google's published `ssmlGender` (`FEMALE`, `MALE`, …); absent if Google gives none
+          example: MALE
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code
+          enum:
+            - INVALID_REQUEST
+            - TARGET_NOT_FOUND
+            - PROVIDER_NOT_FOUND
+            - PROVIDER_TIMEOUT
+            - PROVIDER_RATE_LIMITED
+            - PROVIDER_ERROR
+            - FORMAT_NORMALIZATION_FAILED
+            - INVALID_VOICE
+            - VOICE_CATALOGUE_UNAVAILABLE
+          example: TARGET_NOT_FOUND
+        message:
+          type: string
+          description: Human-readable error description
+          example: "No output or output group named 'bedroom' found"
