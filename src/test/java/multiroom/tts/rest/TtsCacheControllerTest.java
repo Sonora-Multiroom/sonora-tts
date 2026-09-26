@@ -5,6 +5,7 @@ import multiroom.tts.cache.CacheStats;
 import multiroom.tts.config.ProviderType;
 import multiroom.tts.config.TtsProperties;
 import multiroom.tts.config.TtsProviderConfig;
+import multiroom.tts.metrics.TtsMetrics;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -32,6 +33,10 @@ class TtsCacheControllerTest {
 
     @MockBean
     private AudioCache audioCache;
+
+    /** The advice takes it, and every {@code @WebMvcTest} picks the advice up. */
+    @MockBean
+    private TtsMetrics metrics;
 
     @Test
     void deleteWithNoProviderClearsEverythingAndReturns204() throws Exception {

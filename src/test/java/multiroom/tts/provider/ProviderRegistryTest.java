@@ -67,4 +67,24 @@ class ProviderRegistryTest {
                 .isInstanceOf(TtsException.class)
                 .hasMessageContaining("nonexistent");
     }
+
+    @Test
+    void isConfiguredIsTrueOnlyForARegisteredName() {
+        ProviderRegistry registry = new ProviderRegistry(Map.of("openai", mock(TtsProvider.class)), null);
+
+        assertThat(registry.isConfigured("openai")).isTrue();
+        assertThat(registry.isConfigured("nope")).isFalse();
+        assertThat(registry.isConfigured(null)).isFalse();
+    }
+
+    @Test
+    void namesAreTheRegisteredNamesAndCannotBeModified() {
+        Map<String, TtsProvider> providers = new LinkedHashMap<>();
+        providers.put("openai", mock(TtsProvider.class));
+        providers.put("piper-local", mock(TtsProvider.class));
+        ProviderRegistry registry = new ProviderRegistry(providers, null);
+
+        assertThat(registry.names()).containsExactly("openai", "piper-local");
+        assertThatThrownBy(() -> registry.names().add("other")).isInstanceOf(UnsupportedOperationException.class);
+    }
 }

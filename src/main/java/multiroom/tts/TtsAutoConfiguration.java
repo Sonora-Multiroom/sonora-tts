@@ -10,6 +10,9 @@ import multiroom.tts.cache.AudioCache;
 import multiroom.tts.cache.FilesystemAudioCache;
 import multiroom.tts.config.TtsProperties;
 import multiroom.tts.config.TtsProviderConfig;
+import multiroom.tts.metrics.MicrometerTtsMetrics;
+import multiroom.tts.metrics.NoopTtsMetrics;
+import multiroom.tts.metrics.TtsMetrics;
 import multiroom.tts.provider.ProviderRegistry;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.provider.cloud.GoogleCloudTtsProvider;
@@ -21,11 +24,16 @@ import multiroom.tts.provider.local.PiperTtsProvider;
 import multiroom.tts.service.PlaybackCompletionListener;
 import multiroom.tts.service.TtsService;
 import multiroom.tts.service.VoiceQueryService;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -110,8 +118,53 @@ public class TtsAutoConfiguration {
                                   AudioConverter audioConverter, AudioCache audioCache,
                                   TtsInputResolver ttsInputResolver, DeviceRegistryService deviceRegistryService,
                                   DeviceQueryService deviceQueryService, RouteService routeService,
-                                  PlaybackCompletionListener playbackCompletionListener) {
+                                  PlaybackCompletionListener playbackCompletionListener, TtsMetrics ttsMetrics) {
         return new TtsService(properties, providerRegistry, audioConverter, audioCache, ttsInputResolver,
-                deviceRegistryService, deviceQueryService, routeService, playbackCompletionListener);
+                deviceRegistryService, deviceQueryService, routeService, playbackCompletionListener, ttsMetrics);
+    }
+
+    /**
+     * Records into the host's registry when it has one. The registry is resolved through {@code
+     * ObjectProvider} when this bean is created, after every bean definition (the actuator's
+     * included) is registered, so no auto-configuration ordering is needed. A host with
+     * Micrometer but no registry gets the no-op: missing metrics are not a fault.
+     *
+     * <p>The class is named by string so that {@link TtsAutoConfiguration} itself still loads on
+     * a host without Micrometer.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.core.instrument.MeterRegistry")
+    static class MicrometerMetricsConfiguration {
+
+        @Bean
+        public TtsMetrics ttsMetrics(ObjectProvider<MeterRegistry> meterRegistry, AudioCache audioCache,
+                                     TtsProperties properties, ProviderRegistry providerRegistry) {
+            MeterRegistry registry = meterRegistry.getIfAvailable();
+            if (registry == null) {
+                return new NoopTtsMetrics();
+            }
+            return new MicrometerTtsMetrics(registry, audioCache, longestTimeoutSeconds(properties),
+                    providerRegistry.names());
+        }
+
+        /** Disabled entries are not in the registry and never synthesize, so they do not count. */
+        private static int longestTimeoutSeconds(TtsProperties properties) {
+            return properties.getProviders().stream()
+                    .filter(TtsProviderConfig::isEnabled)
+                    .mapToInt(TtsProviderConfig::getTimeoutSeconds)
+                    .max()
+                    .orElse(new TtsProviderConfig().getTimeoutSeconds());
+        }
+    }
+
+    /** A host without Micrometer: the extension runs as before and records nothing. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnMissingClass("io.micrometer.core.instrument.MeterRegistry")
+    static class NoopMetricsConfiguration {
+
+        @Bean
+        public TtsMetrics ttsMetrics() {
+            return new NoopTtsMetrics();
+        }
     }
 }

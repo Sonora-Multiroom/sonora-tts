@@ -102,6 +102,7 @@ moves from `specs/` to `.specify/archive/`.
 | `002-google-voice-selection` | Google voices by full name or engine + language + short name, checked against a per-entry voice catalogue (`INVALID_VOICE` lists the alternatives); Google's error message surfaced; pitch and speaking rate; `GET /api/tts/providers/{name}/voices` | 0.1.1 | [.specify/archive/002-google-voice-selection/](.specify/archive/002-google-voice-selection/) |
 | `003-google-service-account-auth` | `service-account-key-file` as the alternative to `api-key` for `google-cloud`: a JDK-only JWT exchange for per-entry bearer tokens, validated once at start-up, no new error code | 0.1.2 | [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) |
 | `004-gemini-tts-provider` | A `google-gemini` provider type through Google's Text-to-Speech endpoint with a service account (route A): model + voice + language, a style prompt per entry and per request, speaking rate honoured (pitch rejected), start-up faults, a default-provider cost warning, and Gemini voice listing from Google's list (with gender, also added for `google-cloud`) | 0.1.3 | [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) |
+| `005-tts-metrics` | `tts_*` metrics in the host's Micrometer registry (`/actuator/prometheus`): announcements by outcome, error code, queue reason and bounded provider; per-provider synthesis time (histogram up to the longest timeout), characters sent by part and tier, audio seconds; cache hits and occupancy; queue depth per target; playbacks. Billable usage measured once in `TtsService.synthesize`, before the provider call. An unreadable body now gets the contract's `INVALID_REQUEST` `ErrorResponse`. `docs/metrics.md` | 0.1.4 | [specs/005-tts-metrics/](specs/005-tts-metrics/) |
 
 Add a row when a feature merges, and change its path when it is archived.
 
@@ -155,6 +156,18 @@ model, and Google rejects a model filter on it.
 **Prevention Rule:** Use the `google-gemini` catalogue for listing only; never check an
 announcement against it, never filter it by language, and let Google's refusal (with its
 explanation) report an unknown voice.
+
+### ⚠️ Metrics: One Micrometer Class, One Tag-Key Set, No Caller Text
+**Issue:** The host fails to load the extension on a host without Micrometer; a series silently
+disappears from `/actuator/prometheus`; or the host's registry grows without bound.
+**Root Cause:** Micrometer is `provided` by the host, not guaranteed. `PrometheusMeterRegistry`
+drops (without an error) any meter whose tag keys differ from the first meter of the same name.
+And every distinct tag value is a new series that lives until restart.
+**Prevention Rule:** Only `MicrometerTtsMetrics` imports `io.micrometer`; everything else talks to
+`TtsMetrics`. Every series of one metric carries the same tag keys, with `none`/`unknown` for a
+value that does not apply, never a missing tag (`PrometheusNamesTest` checks the scrape). Tags
+never come from caller free text: not the message, voice, language, style prompt, announcement id,
+an unconfigured provider name, an exception message, or a secret.
 
 ### ⚠️ Never Unregister The Announcement's Ephemeral Input
 **Issue:** `IllegalArgumentException("Input '…' is not registered")` when an announcement ends.

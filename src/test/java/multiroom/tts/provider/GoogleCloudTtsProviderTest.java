@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 
@@ -839,5 +840,34 @@ class GoogleCloudTtsProviderTest {
         } catch (RuntimeException e) {
             failures.add(e);
         }
+    }
+
+    // --- 005: type and billing tier ----------------------------------------------------------
+
+    @ParameterizedTest
+    @CsvSource({
+            "en-US-Standard-C, Standard",
+            "en-US-Wavenet-D, Wavenet",
+            "en-US-Neural2-C, Neural2",
+            "en-US-Studio-O, Studio",
+            "en-US-Chirp-HD-F, Chirp-HD",
+            "uk-UA-Chirp3-HD-Charon, Chirp3-HD",
+            "en-us-chirp3-hd-charon, Chirp3-HD"
+    })
+    void theBillingTierIsTheVoicesEngineFamily(String voice, String tier) {
+        GoogleCloudTtsProvider provider = providerUnderTest(5);
+
+        assertThat(provider.billingTier(SynthesisSettings.of(voice, "en-US", null))).isEqualTo(tier);
+        assertThat(server.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
+    void anUnrecognizedEngineIsTierOtherNeverTheVoiceItself() {
+        GoogleCloudTtsProvider provider = providerUnderTest(5);
+
+        assertThat(provider.billingTier(SynthesisSettings.of("en-US-Polyglot-1", "en-US", null))).isEqualTo("other");
+        assertThat(provider.billingTier(SynthesisSettings.of(null, "en-US", null))).isEqualTo("other");
+        assertThat(provider.type()).isEqualTo(ProviderType.GOOGLE_CLOUD);
+        assertThat(server.getAllServeEvents()).isEmpty();
     }
 }

@@ -668,4 +668,17 @@ class GoogleGeminiTtsProviderTest {
             assertThat(text).doesNotContain(privateKey).doesNotContain("ya29.test").doesNotContain("eyJ");
         }
     }
+
+    // --- 005: type and billing tier ----------------------------------------------------------
+
+    @Test
+    void theBillingTierIsTheEntrysConfiguredModel() {
+        GoogleGeminiTtsProvider provider = provider(entry());
+        SynthesisSettings settings = provider.resolveSettings(
+                new RequestedSettings("Puck", null, null, null, null, "Cheerfully"));
+
+        assertThat(provider.type()).isEqualTo(ProviderType.GOOGLE_GEMINI);
+        assertThat(provider.billingTier(settings)).isEqualTo("gemini-2.5-flash-tts");
+        assertThat(server.getAllServeEvents()).isEmpty();
+    }
 }

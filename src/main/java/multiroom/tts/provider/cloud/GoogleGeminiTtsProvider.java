@@ -14,6 +14,7 @@ import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.provider.VoiceCatalogueProvider;
 import multiroom.tts.provider.cloud.google.CatalogueVoice;
+import multiroom.tts.provider.cloud.google.GeminiModel;
 import multiroom.tts.provider.cloud.google.GeminiSettingsResolver;
 import multiroom.tts.provider.cloud.google.GoogleTtsClient;
 import multiroom.tts.provider.cloud.google.GoogleVoiceCatalogue;
@@ -43,6 +44,7 @@ public class GoogleGeminiTtsProvider implements TtsProvider, VoiceCatalogueProvi
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final String name;
+    private final String model;
     private final GeminiSettingsResolver resolver;
     private final GoogleTtsClient client;
     private final GoogleVoiceCatalogue catalogue;
@@ -59,6 +61,7 @@ public class GoogleGeminiTtsProvider implements TtsProvider, VoiceCatalogueProvi
     public GoogleGeminiTtsProvider(TtsProviderConfig config, VoiceCatalogueProperties catalogueProperties,
                                    ServiceAccountKey serviceAccountKey, int maxTextLength, URI apiBase, Clock clock) {
         this.name = config.getName();
+        this.model = GeminiModel.parse(config.getModel()).name();
         this.resolver = new GeminiSettingsResolver(config, maxTextLength);
         this.timeout = Duration.ofSeconds(config.getTimeoutSeconds());
         this.client = new GoogleTtsClient(name, timeout, apiBase, serviceAccountKey, null,
@@ -73,6 +76,17 @@ public class GoogleGeminiTtsProvider implements TtsProvider, VoiceCatalogueProvi
     @Override
     public SynthesisSettings resolveSettings(RequestedSettings requested) {
         return resolver.resolve(requested);
+    }
+
+    @Override
+    public ProviderType type() {
+        return ProviderType.GOOGLE_GEMINI;
+    }
+
+    /** The entry's model, the value sent as {@code voice.modelName}: configuration, never request input. */
+    @Override
+    public String billingTier(SynthesisSettings settings) {
+        return model;
     }
 
     /**

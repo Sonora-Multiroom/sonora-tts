@@ -101,4 +101,12 @@ class OpenAiTtsProviderTest {
                 .hasMessageContaining("Field 'speakingRate' is not supported")
                 .hasMessageContaining("OPENAI");
     }
+
+    @Test
+    void reportsItsTypeAndNoBillingTier() {
+        OpenAiTtsProvider provider = providerUnderTest(5);
+
+        assertThat(provider.type()).isEqualTo(ProviderType.OPENAI);
+        assertThat(provider.billingTier(SynthesisSettings.of("alloy", "en-US", "tts-1"))).isEqualTo("none");
+    }
 }
