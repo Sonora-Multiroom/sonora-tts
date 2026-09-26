@@ -91,4 +91,12 @@ class LocalHttpTtsProviderTest {
                 .isInstanceOf(TtsException.class)
                 .hasMessage("Field 'pitch' is not supported by provider 'local' of type LOCAL_HTTP");
     }
+
+    @Test
+    void reportsItsTypeAndNoBillingTier() {
+        LocalHttpTtsProvider provider = new LocalHttpTtsProvider(config(2, null));
+
+        assertThat(provider.type()).isEqualTo(ProviderType.LOCAL_HTTP);
+        assertThat(provider.billingTier(SynthesisSettings.of("voice", "en-US", null))).isEqualTo("none");
+    }
 }

@@ -291,6 +291,14 @@ multiroom:
 The host starts normally, the extension inventory reports `tts` as `DISABLED`, and no
 `/api/tts/**` path is mapped. Every other extension is unaffected.
 
+## Metrics
+
+The extension publishes `tts_*` metrics (announcements, synthesis time and characters, cache,
+queues, playbacks) through the host's `/actuator/prometheus`. There is nothing to configure here:
+`enabled: false` removes them with the rest of the extension, and the host setting
+`management.metrics.enable.tts: false` removes only them. See **[metrics.md](metrics.md)** for
+every metric, the definition of billable usage, and example queries.
+
 ## Field reference
 
 ### `multiroom.tts.*`
@@ -466,6 +474,7 @@ GET    /api/tts/cache/stats                 # entry count, size, per-provider br
 
 ## See also
 
+- [metrics.md](metrics.md) — the `tts_*` metrics and example queries
 - [google-cloud-tts-setup.md](google-cloud-tts-setup.md) — obtaining a Google Cloud API key or service account key
 - [.specify/archive/001-tts-extension/quickstart.md](../.specify/archive/001-tts-extension/quickstart.md) — build, deploy
   and end-to-end walkthrough, including installing Piper

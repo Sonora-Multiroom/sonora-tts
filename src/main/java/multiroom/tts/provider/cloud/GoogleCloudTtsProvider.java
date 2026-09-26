@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
+import multiroom.tts.config.ProviderType;
 import multiroom.tts.config.TtsProviderConfig;
 import multiroom.tts.config.VoiceCatalogueProperties;
 import multiroom.tts.provider.RequestedSettings;
@@ -13,6 +14,7 @@ import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.provider.VoiceCatalogueProvider;
 import multiroom.tts.provider.cloud.google.CatalogueVoice;
+import multiroom.tts.provider.cloud.google.GoogleEngine;
 import multiroom.tts.provider.cloud.google.GoogleTtsClient;
 import multiroom.tts.provider.cloud.google.GoogleVoiceCatalogue;
 import multiroom.tts.provider.cloud.google.GoogleVoiceCatalogue.CheckResult;
@@ -43,6 +45,7 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
 
     private static final URI DEFAULT_API_BASE = URI.create("https://texttospeech.googleapis.com/v1/");
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String OTHER_TIER = "other";
 
     private final String name;
     private final GoogleVoiceResolver resolver;
@@ -84,6 +87,26 @@ public class GoogleCloudTtsProvider implements TtsProvider, VoiceCatalogueProvid
     @Override
     public SynthesisSettings resolveSettings(RequestedSettings requested) {
         return resolver.resolve(requested);
+    }
+
+    @Override
+    public ProviderType type() {
+        return ProviderType.GOOGLE_CLOUD;
+    }
+
+    /**
+     * The engine family of the resolved voice ({@code Chirp3-HD}), which is what Google prices by.
+     * An unrecognized engine, or no voice at all, is {@code other}: the voice is caller text and
+     * must not become a tier of its own.
+     */
+    @Override
+    public String billingTier(SynthesisSettings settings) {
+        if (settings.voice() == null || !GoogleVoiceName.isWellFormed(settings.voice())) {
+            return OTHER_TIER;
+        }
+        return GoogleVoiceName.parse(settings.voice()) instanceof GoogleVoiceName.Full full
+                ? full.engine().map(GoogleEngine::canonical).orElse(OTHER_TIER)
+                : OTHER_TIER;
     }
 
     /**

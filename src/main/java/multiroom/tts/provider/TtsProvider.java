@@ -2,6 +2,7 @@ package multiroom.tts.provider;
 
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
+import multiroom.tts.config.ProviderType;
 
 /**
  * SPI for a text-to-speech backend, cloud or local.
@@ -35,4 +36,19 @@ public interface TtsProvider {
      * @throws TtsException on timeout, rate limiting, or any other provider-side failure
      */
     SynthesisResult synthesize(SynthesisRequest request);
+
+    /** This entry's type, as configured; the {@code type} tag of its metrics. */
+    ProviderType type();
+
+    /**
+     * The price tier the provider bills these settings at, the {@code tier} tag of the characters
+     * sent. {@code none} for a provider with a single tier or no billing.
+     *
+     * <p>Pure, like {@link #resolveSettings}: no I/O. The value must come from the resolved
+     * settings or the entry's configuration and belong to a small fixed set, never from caller
+     * free text such as a voice name, because every distinct value is a new metric series.
+     */
+    default String billingTier(SynthesisSettings settings) {
+        return "none";
+    }
 }

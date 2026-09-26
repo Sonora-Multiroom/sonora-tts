@@ -87,6 +87,7 @@ examples for every provider type, and how to trigger an announcement and manage 
 | Document | What it covers |
 |---|---|
 | [docs/configuration.md](docs/configuration.md) | How to configure providers, cache and queue; triggering announcements |
+| [docs/metrics.md](docs/metrics.md) | The metrics in the host's `/actuator/prometheus`: what each counts, billable usage, example queries |
 | [docs/google-cloud-tts-setup.md](docs/google-cloud-tts-setup.md) | Setting up Google Cloud: billing, the API, an API key or a service account key, and Gemini voices (`google-gemini`) |
 | [AGENTS.md](AGENTS.md) | How to work in this repository, and the rules across the repo boundary |
 | [.specify/memory/constitution.md](.specify/memory/constitution.md) | Engineering principles, the merge gate, the extension boundary |

@@ -19,6 +19,8 @@ import multiroom.tts.cache.AudioCache;
 import multiroom.tts.cache.CacheKey;
 import multiroom.tts.cache.CacheWriteException;
 import multiroom.tts.config.TtsProperties;
+import multiroom.tts.metrics.SynthesisUsage;
+import multiroom.tts.metrics.TtsMetrics;
 import multiroom.tts.provider.ProviderRegistry;
 import multiroom.tts.provider.RequestedSettings;
 import multiroom.tts.provider.SynthesisRequest;
@@ -27,6 +29,7 @@ import multiroom.tts.provider.SynthesisSettings;
 import multiroom.tts.provider.TtsProvider;
 import multiroom.tts.queue.AnnouncementQueueManager;
 import multiroom.tts.queue.AnnouncementTask;
+import multiroom.tts.queue.QueueRejectedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
@@ -69,11 +72,13 @@ public class TtsService implements SmartLifecycle {
     private final RouteService routeService;
     private final PlaybackCompletionListener completionListener;
     private final AnnouncementQueueManager queueManager;
+    private final TtsMetrics metrics;
 
     public TtsService(TtsProperties properties, ProviderRegistry providerRegistry, AudioConverter audioConverter,
                        AudioCache audioCache, TtsInputResolver inputResolver,
                        DeviceRegistryService deviceRegistryService, DeviceQueryService deviceQueryService,
-                       RouteService routeService, PlaybackCompletionListener completionListener) {
+                       RouteService routeService, PlaybackCompletionListener completionListener,
+                       TtsMetrics metrics) {
         this.properties = properties;
         this.providerRegistry = providerRegistry;
         this.audioConverter = audioConverter;
@@ -83,10 +88,43 @@ public class TtsService implements SmartLifecycle {
         this.deviceQueryService = deviceQueryService;
         this.routeService = routeService;
         this.completionListener = completionListener;
-        this.queueManager = new AnnouncementQueueManager(properties.getQueue().getMaxDepthPerTarget(), this::activate);
+        this.metrics = metrics;
+        this.queueManager = new AnnouncementQueueManager(properties.getQueue().getMaxDepthPerTarget(),
+                this::activateCountingEarlyFailures);
     }
 
+    /**
+     * Counts every answer exactly once, here rather than at each {@code throw}, so a new failure
+     * path is counted without anyone remembering to.
+     */
     public AnnounceResult speak(AnnounceCommand command) {
+        String providerTag = providerTag(command.providerName());
+        try {
+            AnnounceResult result = announce(command);
+            metrics.announcementAccepted(providerTag);
+            return result;
+        } catch (TtsException e) {
+            String reason = e instanceof QueueRejectedException rejected ? rejected.tagValue() : TtsMetrics.NONE;
+            metrics.announcementRejected(providerTag, e.getErrorCode().name(), reason);
+            throw e;
+        } catch (RuntimeException e) {
+            metrics.announcementRejected(providerTag, TtsMetrics.INTERNAL, TtsMetrics.NONE);
+            throw e;
+        }
+    }
+
+    /**
+     * A name the caller sent becomes a tag only if it is configured: anything else would let a
+     * caller mint a new series per request.
+     */
+    private String providerTag(String requestedProvider) {
+        if (requestedProvider == null) {
+            return providerRegistry.defaultProviderName();
+        }
+        return providerRegistry.isConfigured(requestedProvider) ? requestedProvider : TtsMetrics.UNKNOWN;
+    }
+
+    private AnnounceResult announce(AnnounceCommand command) {
         validateText(command.text());
         validateTargetExists(command.targetType(), command.targetName());
 
@@ -112,6 +150,7 @@ public class TtsService implements SmartLifecycle {
         boolean temporaryFile = false;
         Path audioFile;
         Optional<Path> cached = audioCache.get(cacheKey);
+        metrics.cacheLookup(cached.isPresent());
         if (cached.isPresent()) {
             cacheHit = true;
             audioFile = cached.get();
@@ -120,10 +159,11 @@ public class TtsService implements SmartLifecycle {
         } else {
             cacheHit = false;
             log.debug("TTS_CACHE_MISS text.length={} provider={}", command.text().length(), providerName);
-            SynthesisResult synthesisResult = synthesize(provider, providerName,
+            Synthesized synthesized = synthesize(provider, providerName,
                     new SynthesisRequest(command.text(), settings,
                             NATIVE_FORMAT.sampleRate(), NATIVE_FORMAT.channels()));
-            byte[] pcm = audioConverter.convert(synthesisResult.audioData(), NATIVE_FORMAT);
+            byte[] pcm = audioConverter.convert(synthesized.result().audioData(), NATIVE_FORMAT);
+            metrics.audioProduced(synthesized.usage(), audioSeconds(pcm));
             try {
                 audioFile = audioCache.put(cacheKey, pcm);
                 audioCache.pin(cacheKey);
@@ -142,9 +182,10 @@ public class TtsService implements SmartLifecycle {
                 command.targetName(), audioFile, temporaryFile, routeSnapshot,
                 temporaryFile ? null : cacheKey);
 
+        String queueKey = queueKey(command.targetType(), command.targetName());
         int queueDepth;
         try {
-            queueDepth = queueManager.enqueue(queueKey(command.targetType(), command.targetName()), task);
+            queueDepth = queueManager.enqueue(queueKey, task);
         } catch (RuntimeException e) {
             // The task was never handed to the queue, so nothing will ever restore this
             // reservation via RouteDestroyedEvent — release it here instead of leaking it
@@ -161,25 +202,60 @@ public class TtsService implements SmartLifecycle {
             }
             throw e;
         }
+        metrics.trackQueue(command.targetType(), command.targetName(), () -> queueManager.depth(queueKey));
         log.info("TTS_REQUEST_RECEIVED announcementId={} target={} cacheHit={} queueDepth={}",
                 announcementId, command.targetName(), cacheHit, queueDepth);
 
         return new AnnounceResult(announcementId, cacheHit, queueDepth);
     }
 
-    private SynthesisResult synthesize(TtsProvider provider, String providerName, SynthesisRequest request) {
+    /** What one provider call produced, and the work it was asked for. */
+    private record Synthesized(SynthesisResult result, SynthesisUsage usage) {
+    }
+
+    /**
+     * The single call site of {@link TtsProvider#synthesize} for every provider type, so the
+     * characters are counted here, once, before the provider is called: this is the point a
+     * future monthly character budget will check. Format conversion stays outside the timer.
+     */
+    private Synthesized synthesize(TtsProvider provider, String providerName, SynthesisRequest request) {
+        SynthesisUsage usage = SynthesisUsage.of(providerName, provider.type(),
+                provider.billingTier(request.settings()), request.text(), request.settings().stylePrompt());
         log.debug("TTS_SYNTHESIS_STARTED provider={}", providerName);
+        TtsMetrics.SynthesisTimer timer = metrics.synthesisStarted(usage);
         try {
             SynthesisResult result = provider.synthesize(request);
+            timer.succeeded();
             log.info("TTS_SYNTHESIS_COMPLETED provider={}", providerName);
-            return result;
+            return new Synthesized(result, usage);
         } catch (TtsException e) {
+            timer.failed(e.getErrorCode());
             log.error("TTS_SYNTHESIS_ERROR provider={} code={}", providerName, e.getErrorCode());
             throw e;
         } catch (RuntimeException e) {
+            timer.failed(TtsErrorCode.PROVIDER_ERROR);
             log.error("TTS_SYNTHESIS_ERROR provider={} code={}", providerName, TtsErrorCode.PROVIDER_ERROR, e);
             throw new TtsException(TtsErrorCode.PROVIDER_ERROR,
                     "Provider '" + providerName + "' failed: " + e.getMessage(), e);
+        }
+    }
+
+    /** Exact, because the audio is already converted: bytes over bytes per second of the native format. */
+    private static double audioSeconds(byte[] pcm) {
+        return (double) pcm.length / (NATIVE_FORMAT.sampleRate() * NATIVE_FORMAT.bytesPerFrame());
+    }
+
+    /**
+     * What the queue runs. {@link #activate} counts a failed route itself and does not rethrow,
+     * so only a failure before the route step (registering the input, tracking it) reaches the
+     * catch here, and no failure is counted twice.
+     */
+    private void activateCountingEarlyFailures(AnnouncementTask task, Runnable onPlaybackComplete) {
+        try {
+            activate(task, onPlaybackComplete);
+        } catch (RuntimeException e) {
+            metrics.playbackFailed();
+            throw e;
         }
     }
 
@@ -201,8 +277,10 @@ public class TtsService implements SmartLifecycle {
             } else {
                 routeService.createRoute(task.inputId(), GroupId.of(task.targetName()));
             }
+            metrics.playbackStarted();
             log.info("TTS_PLAYBACK_STARTED announcementId={} target={}", task.announcementId(), task.targetName());
         } catch (RuntimeException e) {
+            metrics.playbackFailed();
             log.error("Failed to create route for announcement {} on target {}",
                     task.announcementId(), task.targetName(), e);
             // No route was created, so RouteDestroyedEvent will never arrive for this input —

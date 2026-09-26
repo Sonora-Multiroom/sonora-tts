@@ -121,4 +121,12 @@ class PiperTtsProviderTest {
                 .isInstanceOf(TtsException.class)
                 .hasMessage("Field 'engine' is not supported by provider 'piper-local' of type PIPER");
     }
+
+    @Test
+    void reportsItsTypeAndNoBillingTier(@TempDir Path dir) throws Exception {
+        PiperTtsProvider provider = new PiperTtsProvider(configFor(dir.resolve("python3"), modelWithConfig(dir), 5));
+
+        assertThat(provider.type()).isEqualTo(ProviderType.PIPER);
+        assertThat(provider.billingTier(SynthesisSettings.of(null, "en-US", null))).isEqualTo("none");
+    }
 }

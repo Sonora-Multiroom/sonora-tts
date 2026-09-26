@@ -22,6 +22,14 @@ Sync Impact Report:
   replaced with a field-agnostic statement plus the PATH-vs-path distinction that motivated the
   change, so the principle stops naming implementation details of one feature
 - Templates requiring updates: none
+
+- Version: 1.0.2 (patch — clarification, no principle added, removed or redefined)
+- VIII "Depend on `multiroom-api` only" read literally also forbade the host-supplied libraries
+  that Principle II and VIII's own "Bundle nothing" rule already require at `provided` scope
+  (Spring, Jackson, SLF4J). Reworded to what it always meant: the only *multiroom* artifact is
+  `multiroom-api`; other libraries the host supplies on the shared classpath (e.g. Micrometer,
+  used from 005-tts-metrics) are depended on at `provided` scope and never bundled
+- Templates requiring updates: none
 -->
 
 # Sonora TTS Constitution
@@ -140,8 +148,10 @@ These are contracts of the host's extension loader. Upstream they were an intern
 principle; here they are the terms on which this JAR is admitted, and **nothing in this repository
 re-checks them beyond the inherited build gates**:
 
-- **Depend on `multiroom-api` only**, at `provided` scope. A dependency on `multiroom-core` is an
-  architectural violation, and the inherited `bannedDependencies` enforcer rule fails the build
+- **Depend on `multiroom-api` only** among multiroom artifacts, at `provided` scope. A dependency
+  on `multiroom-core` is an architectural violation, and the inherited `bannedDependencies`
+  enforcer rule fails the build. Other libraries the host supplies on the shared classpath
+  (Spring, Jackson, SLF4J, Micrometer) are `provided` too, and never bundled
 - **Bundle nothing framework-shaped**: Spring, Jackson, SLF4J/Logback and the API itself are
   supplied by the host. Shading them risks a class-name collision with another independently built
   extension
@@ -204,4 +214,4 @@ build — it fails someone's audio system at start-up.
 - Where the two conflict on anything inside this repository, **this one wins** — it was written
   knowing there is no reactor here
 
-**Version**: 1.0.1 | **Ratified**: 2026-09-20 | **Last Amended**: 2026-09-20
+**Version**: 1.0.2 | **Ratified**: 2026-09-20 | **Last Amended**: 2026-09-26

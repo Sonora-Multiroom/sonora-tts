@@ -2,6 +2,7 @@ package multiroom.tts.rest;
 
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
+import multiroom.tts.metrics.TtsMetrics;
 import multiroom.tts.provider.cloud.google.CatalogueVoice;
 import multiroom.tts.service.VoiceQueryService;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,10 @@ class TtsVoiceControllerTest {
 
     @MockBean
     private VoiceQueryService voiceQueryService;
+
+    /** The advice takes it, and every {@code @WebMvcTest} picks the advice up. */
+    @MockBean
+    private TtsMetrics metrics;
 
     @Test
     void us5_1_listsTheVoicesInThePublishedShape() throws Exception {

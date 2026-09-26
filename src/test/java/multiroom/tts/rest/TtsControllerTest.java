@@ -2,6 +2,7 @@ package multiroom.tts.rest;
 
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
+import multiroom.tts.metrics.TtsMetrics;
 import multiroom.tts.service.AnnounceCommand;
 import multiroom.tts.service.AnnounceResult;
 import multiroom.tts.service.TtsService;
@@ -32,6 +33,10 @@ class TtsControllerTest {
 
     @MockBean
     private TtsService ttsService;
+
+    /** The advice takes it, and every {@code @WebMvcTest} picks the advice up. */
+    @MockBean
+    private TtsMetrics metrics;
 
     @Test
     void validRequestReturns202() throws Exception {

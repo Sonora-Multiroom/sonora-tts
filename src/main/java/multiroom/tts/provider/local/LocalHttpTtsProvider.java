@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
+import multiroom.tts.config.ProviderType;
 import multiroom.tts.config.TtsProviderConfig;
 import multiroom.tts.provider.DefaultSettingsResolution;
 import multiroom.tts.provider.RequestedSettings;
@@ -44,6 +45,11 @@ public class LocalHttpTtsProvider implements TtsProvider {
     @Override
     public SynthesisSettings resolveSettings(RequestedSettings requested) {
         return DefaultSettingsResolution.resolve(config, requested);
+    }
+
+    @Override
+    public ProviderType type() {
+        return ProviderType.LOCAL_HTTP;
     }
 
     @Override

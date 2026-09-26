@@ -1,7 +1,6 @@
 package multiroom.tts.queue;
 
 import multiroom.tts.TtsErrorCode;
-import multiroom.tts.TtsException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,20 +39,31 @@ public class AnnouncementQueueManager {
      * Adds {@code task} to its target's queue, starting a worker if none is active.
      *
      * @return the queue depth for this target immediately after enqueuing, including this task
-     * @throws TtsException {@link TtsErrorCode#PROVIDER_ERROR} if the queue is full or shutting down
+     * @throws QueueRejectedException ({@link TtsErrorCode#PROVIDER_ERROR}) if the queue is full or
+     *                                 shutting down, carrying which of the two it was
      */
     public int enqueue(String targetKey, AnnouncementTask task) {
         if (!running) {
-            throw new TtsException(TtsErrorCode.PROVIDER_ERROR, "TTS extension is shutting down");
+            throw new QueueRejectedException(QueueRejectedException.Reason.SHUTTING_DOWN,
+                    "TTS extension is shutting down");
         }
         LinkedBlockingQueue<AnnouncementTask> queue = queues.computeIfAbsent(targetKey,
                 key -> new LinkedBlockingQueue<>(maxDepthPerTarget));
         if (!queue.offer(task)) {
-            throw new TtsException(TtsErrorCode.PROVIDER_ERROR,
+            throw new QueueRejectedException(QueueRejectedException.Reason.QUEUE_FULL,
                     "Announcement queue for '" + targetKey + "' is full");
         }
         ensureWorkerRunning(targetKey, queue);
         return queue.size();
+    }
+
+    /**
+     * The announcements waiting for a target, excluding the one playing: the worker takes a task
+     * off the queue before activating it. 0 for a target that has never had one.
+     */
+    public int depth(String targetKey) {
+        LinkedBlockingQueue<AnnouncementTask> queue = queues.get(targetKey);
+        return queue == null ? 0 : queue.size();
     }
 
     private void ensureWorkerRunning(String targetKey, LinkedBlockingQueue<AnnouncementTask> queue) {

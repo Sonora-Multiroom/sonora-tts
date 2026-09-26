@@ -4,7 +4,9 @@ import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
 
 import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Named lookup of the configured {@link TtsProvider} instances. The first entry is the implicit
@@ -55,5 +57,15 @@ public class ProviderRegistry {
                     "No provider configured with name '" + name + "'");
         }
         return provider;
+    }
+
+    /** Whether an entry with this name is configured and enabled; {@code false} for {@code null}. */
+    public boolean isConfigured(String name) {
+        return name != null && providersByName.containsKey(name);
+    }
+
+    /** The configured names, in configuration order; an unmodifiable view. */
+    public Set<String> names() {
+        return Collections.unmodifiableSet(providersByName.keySet());
     }
 }
