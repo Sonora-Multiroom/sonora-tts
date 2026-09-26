@@ -379,7 +379,7 @@ WireMock and the provider mocks see no synthesis.
   - Confirm `git diff master -- src/test/java/multiroom/tts/provider/GoogleCloudTtsProviderTest.java` is empty.
   - Confirm `mvn dependency:tree -Dscope=runtime` is unchanged and `unzip -l target/multiroom-tts-0.1.3.jar` lists no `com/google/` entries.
   - Run SpotBugs on the changed classes if it is available, and fix or justify its findings (constitution V).
-- [ ] T053 Run [quickstart.md](quickstart.md) §2–§3 against the local core with a real service account key (merge gate, part 2):
+- [X] T053 Run [quickstart.md](quickstart.md) §2–§3 against the local core with a real service account key (merge gate, part 2):
   - `tts` is at `0.1.3` and not `REJECTED`.
   - Work through the behavioural table. It costs Gemini tokens, so keep it to a few short texts.
   - Confirm normal-speed playback (research R3).
@@ -387,7 +387,7 @@ WireMock and the provider mocks see no synthesis.
   - Search the core's log for secrets as in the SC-008 row.
 
   This needs the user's key file and a project with the Agent Platform API enabled; ask the user for both.
-- [ ] T054 Run [quickstart.md](quickstart.md) §4 on production **only with the user's explicit permission** for `mvn deploy`, each restart and each configuration edit. Constitution VII requires all of it:
+- [X] T054 Run [quickstart.md](quickstart.md) §4 on production **only with the user's explicit permission** for `mvn deploy`, each restart and each configuration edit. Constitution VII requires all of it:
   - The existing `google` entry must announce with no edit, and a pre-upgrade text must be a cache hit.
   - One short announcement through a **non-default** `google-gemini` entry must play at the right speed and pitch on the Pi, which proves the 24 kHz source path there. If the user does not want Gemini on production, remove the entry afterwards.
 

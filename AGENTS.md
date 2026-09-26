@@ -101,7 +101,7 @@ moves from `specs/` to `.specify/archive/`.
 | `001-tts-extension` | The extension itself: announcements to an output or group, four providers (OpenAI, Google Cloud, Piper, local HTTP), on-disk LRU cache, per-target playback queue, `/api/tts/**` | 0.1.0 | [.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) |
 | `002-google-voice-selection` | Google voices by full name or engine + language + short name, checked against a per-entry voice catalogue (`INVALID_VOICE` lists the alternatives); Google's error message surfaced; pitch and speaking rate; `GET /api/tts/providers/{name}/voices` | 0.1.1 | [.specify/archive/002-google-voice-selection/](.specify/archive/002-google-voice-selection/) |
 | `003-google-service-account-auth` | `service-account-key-file` as the alternative to `api-key` for `google-cloud`: a JDK-only JWT exchange for per-entry bearer tokens, validated once at start-up, no new error code | 0.1.2 | [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) |
-| `004-gemini-tts-provider` | A `google-gemini` provider type through Google's Text-to-Speech endpoint with a service account (route A): model + voice + language, a style prompt per entry and per request, speaking rate honoured (pitch rejected), start-up faults, a default-provider cost warning, and Gemini voice listing from Google's list (with gender, also added for `google-cloud`) | 0.1.3 | [specs/004-gemini-tts-provider/](specs/004-gemini-tts-provider/) — merged, not yet archived |
+| `004-gemini-tts-provider` | A `google-gemini` provider type through Google's Text-to-Speech endpoint with a service account (route A): model + voice + language, a style prompt per entry and per request, speaking rate honoured (pitch rejected), start-up faults, a default-provider cost warning, and Gemini voice listing from Google's list (with gender, also added for `google-cloud`) | 0.1.3 | [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) |
 
 Add a row when a feature merges, and change its path when it is archived.
 
@@ -132,11 +132,29 @@ catalogue check included — belongs in `synthesize`, which runs only on a miss.
 
 ### ⚠️ Only Google Voice Keys Are Case-Folded
 **Issue:** Two voices of a local engine start sharing one cache entry and the wrong audio plays.
-**Root Cause:** Google voice names are unique regardless of case, so the Google resolver case-folds
-its `voiceKey`; a local HTTP engine may be case-sensitive.
+**Root Cause:** Google voice names are unique regardless of case, so the `google-cloud` resolver
+case-folds its `voiceKey`, and the `google-gemini` resolver canonicalizes to `Kore` form (which
+is also what Google receives); a local HTTP engine may be case-sensitive.
 **Prevention Rule:** Put cache-key normalization in the provider's resolver (`voiceKey`, `pitchKey`,
 `speakingRateKey`), never in `TtsService`, and never fold case for a provider whose names can
 differ only by case.
+
+### ⚠️ A New Cache-Key Dimension Must Not Change Existing Hashes
+**Issue:** After an upgrade every announcement is a miss, and Google is billed again for audio
+already on disk.
+**Root Cause:** `CacheKey.toHash()` hashes a joined string; adding a component unconditionally
+changes the string, and so the hash, of every existing entry.
+**Prevention Rule:** Append a new dimension only when it is set (`|p=`, `|r=`, `|s=`), after the
+existing ones, and leave it out at its neutral value. Pin the pre-change hashes in `CacheKeyTest`.
+
+### ⚠️ Google's Voice List Is Not A Gemini Voice Check
+**Issue:** A valid Gemini voice is refused, or a voice the model lacks is accepted and then fails
+at Google.
+**Root Cause:** `GET v1/voices` lists Gemini voices as bare names tagged `en-US` only, with no
+model, and Google rejects a model filter on it.
+**Prevention Rule:** Use the `google-gemini` catalogue for listing only; never check an
+announcement against it, never filter it by language, and let Google's refusal (with its
+explanation) report an unknown voice.
 
 ### ⚠️ Never Unregister The Announcement's Ephemeral Input
 **Issue:** `IllegalArgumentException("Input '…' is not registered")` when an announcement ends.

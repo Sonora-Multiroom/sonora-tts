@@ -1,8 +1,8 @@
 # Contract: Configuration Surface (`google-gemini`)
 
 **Feature**: `004-gemini-tts-provider` | Binds under `multiroom.tts` in the host's `multiroom.yml`.
-Everything in [002's contract](../../../.specify/archive/002-google-voice-selection/contracts/configuration.md)
-and [003's contract](../../../.specify/archive/003-google-service-account-auth/contracts/configuration.md)
+Everything in [002's contract](../../002-google-voice-selection/contracts/configuration.md)
+and [003's contract](../../003-google-service-account-auth/contracts/configuration.md)
 still holds for the other types. This document adds one type and two settings.
 
 ## Provider entry: `multiroom.tts.providers[n]`, `type: google-gemini`

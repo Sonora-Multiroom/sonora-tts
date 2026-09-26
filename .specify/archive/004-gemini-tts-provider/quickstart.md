@@ -36,7 +36,7 @@ Prerequisites:
 - The `multiroom-ai` checkout, built.
 - A real service account key file whose project has the **Agent Platform API** enabled, and a
   service account with the **Agent Platform User** role (see
-  [docs/google-cloud-tts-setup.md](../../docs/google-cloud-tts-setup.md)).
+  [docs/google-cloud-tts-setup.md](../../../docs/google-cloud-tts-setup.md)).
 - A `multiroom.yml` with a `google-gemini` entry named `gemini`, as in the configuration contract's
   example. Keep a classic entry as the default.
 

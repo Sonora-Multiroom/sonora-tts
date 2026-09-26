@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-25
 
-**Status**: Draft
+**Status**: Completed
 
 **Depends on**: `002-google-voice-selection` and `003-google-service-account-auth` (both
 completed). This feature adds a provider type. The existing `google-cloud` type, routing,
