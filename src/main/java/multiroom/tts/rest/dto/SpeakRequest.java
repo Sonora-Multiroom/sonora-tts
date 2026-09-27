@@ -1,4 +1,4 @@
-package multiroom.tts.rest;
+package multiroom.tts.rest.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;

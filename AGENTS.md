@@ -189,7 +189,8 @@ hold audio in memory expecting a resolver to stream it.
 **Root Cause:** Every extension's controllers share the host's one `DispatcherServlet`, so an advice
 with no scope applies to all of them.
 **Prevention Rule:** Keep `TtsExceptionHandler` scoped with `assignableTypes` to this module's
-controllers, and add each new controller to that list.
+API interfaces (`multiroom.tts.rest.api`). A new controller implements one of them, or its new
+interface is added to that list.
 
 ### ⚠️ Piper Has No Binary, And `python-executable` Is Not A Path
 **Issue:** Start-up validation rejects `python-executable: python3`, or an operator looks for a
