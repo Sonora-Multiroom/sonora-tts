@@ -1,8 +1,11 @@
-package multiroom.tts.rest;
+package multiroom.tts.rest.advice;
 
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
 import multiroom.tts.metrics.TtsMetrics;
+import multiroom.tts.rest.controller.TtsCacheController;
+import multiroom.tts.rest.controller.TtsController;
+import multiroom.tts.rest.dto.ErrorResponse;
 import multiroom.tts.service.TtsService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -83,7 +86,8 @@ class TtsExceptionHandlerTest {
                 .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.message").value("Request body could not be read"));
         verify(metrics).announcementRejected("unknown", "INVALID_REQUEST", "none");
-        verifyNoInteractions(ttsService);
+        // Not verifyNoInteractions: the context start-up asks the mocked SmartLifecycle isAutoStartup().
+        verify(ttsService, never()).speak(any());
     }
 
     @Test

@@ -1,4 +1,4 @@
-package multiroom.tts.rest;
+package multiroom.tts.rest.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -18,7 +18,7 @@ import java.util.List;
 @Schema(name = "TtsVoiceListResponse")
 public record VoiceListResponse(String providerName, List<VoiceDescriptor> voices) {
 
-    static VoiceListResponse of(String providerName, List<CatalogueVoice> voices) {
+    public static VoiceListResponse of(String providerName, List<CatalogueVoice> voices) {
         return new VoiceListResponse(providerName, voices.stream().map(VoiceDescriptor::of).toList());
     }
 

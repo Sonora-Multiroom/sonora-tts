@@ -1,16 +1,17 @@
-package multiroom.tts.rest;
+package multiroom.tts.rest.api;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
-import multiroom.tts.service.VoiceQueryService;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import multiroom.tts.rest.dto.ErrorResponse;
+import multiroom.tts.rest.dto.VoiceListResponse;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code GET /api/tts/providers/{providerName}/voices[?language=&engine=]}. For a
@@ -19,15 +20,9 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code google-gemini} entry it lists the Gemini voices Google publishes, which announcing does
  * not check against.
  */
-@RestController
+@Tag(name = "TTS Voices", description = "The voices a configured provider offers")
 @RequestMapping("/api/tts/providers")
-public class TtsVoiceController {
-
-    private final VoiceQueryService voiceQueryService;
-
-    public TtsVoiceController(VoiceQueryService voiceQueryService) {
-        this.voiceQueryService = voiceQueryService;
-    }
+public interface TtsVoiceApi {
 
     @GetMapping("/{providerName}/voices")
     @Operation(summary = "List the voices a provider offers", operationId = "listVoices")
@@ -40,9 +35,7 @@ public class TtsVoiceController {
             @ApiResponse(responseCode = "503", description = "The voice catalogue cannot be fetched now",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    public VoiceListResponse listVoices(@PathVariable String providerName,
-                                        @RequestParam(required = false) String language,
-                                        @RequestParam(required = false) String engine) {
-        return VoiceListResponse.of(providerName, voiceQueryService.listVoices(providerName, language, engine));
-    }
+    VoiceListResponse listVoices(@PathVariable String providerName,
+                                 @RequestParam(required = false) String language,
+                                 @RequestParam(required = false) String engine);
 }

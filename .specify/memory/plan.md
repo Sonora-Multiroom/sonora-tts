@@ -49,8 +49,11 @@ src/main/java/multiroom/tts/
 ├── service/                   # TtsService (validate → resolve → cache → synthesize → convert →
 │                              #   enqueue), PlaybackCompletionListener (@EventListener
 │                              #   RouteDestroyedEvent), VoiceQueryService (voice listing)
-└── rest/                      # TtsController, TtsCacheController, TtsVoiceController,
-                               #   scoped TtsExceptionHandler
+└── rest/
+    ├── api/                   # TtsApi, TtsCacheApi, TtsVoiceApi: mappings + OpenAPI annotations
+    ├── controller/            # TtsController, TtsCacheController, TtsVoiceController (implement them)
+    ├── dto/                   # SpeakRequest, SpeakAcceptedResponse, VoiceListResponse, ErrorResponse
+    └── advice/                # TtsExceptionHandler, scoped to the api/ interfaces
 src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
 ```
 

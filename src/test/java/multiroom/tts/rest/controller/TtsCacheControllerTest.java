@@ -1,4 +1,4 @@
-package multiroom.tts.rest;
+package multiroom.tts.rest.controller;
 
 import multiroom.tts.cache.AudioCache;
 import multiroom.tts.cache.CacheStats;

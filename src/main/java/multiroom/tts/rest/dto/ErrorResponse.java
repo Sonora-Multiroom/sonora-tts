@@ -1,4 +1,4 @@
-package multiroom.tts.rest;
+package multiroom.tts.rest.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 

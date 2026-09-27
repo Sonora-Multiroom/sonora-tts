@@ -1,8 +1,12 @@
-package multiroom.tts.rest;
+package multiroom.tts.rest.advice;
 
 import multiroom.tts.TtsErrorCode;
 import multiroom.tts.TtsException;
 import multiroom.tts.metrics.TtsMetrics;
+import multiroom.tts.rest.api.TtsApi;
+import multiroom.tts.rest.api.TtsCacheApi;
+import multiroom.tts.rest.api.TtsVoiceApi;
+import multiroom.tts.rest.dto.ErrorResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -16,12 +20,12 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * The single {@link TtsErrorCode} to HTTP status mapping. Scoped to this module's own
- * controllers: under 019's shared {@code DispatcherServlet}, an unscoped {@code
- * @RestControllerAdvice} here would otherwise convert another module's exceptions into this
- * module's error shape.
+ * The single {@link TtsErrorCode} to HTTP status mapping. Scoped to this module's own API
+ * interfaces, so every controller implementing one is covered: under 019's shared {@code
+ * DispatcherServlet}, an unscoped {@code @RestControllerAdvice} here would otherwise convert
+ * another module's exceptions into this module's error shape.
  */
-@RestControllerAdvice(assignableTypes = {TtsController.class, TtsCacheController.class, TtsVoiceController.class})
+@RestControllerAdvice(assignableTypes = {TtsApi.class, TtsCacheApi.class, TtsVoiceApi.class})
 public class TtsExceptionHandler {
 
     private static final Set<TtsErrorCode> CALLER_FIXABLE = EnumSet.of(
@@ -72,7 +76,7 @@ public class TtsExceptionHandler {
      * unknown} because the body was never read far enough to trust one.
      */
     private ResponseEntity<ErrorResponse> invalidRequest(String message, HandlerMethod handlerMethod) {
-        if (handlerMethod != null && TtsController.class.isAssignableFrom(handlerMethod.getBeanType())) {
+        if (handlerMethod != null && TtsApi.class.isAssignableFrom(handlerMethod.getBeanType())) {
             metrics.announcementRejected(TtsMetrics.UNKNOWN, TtsErrorCode.INVALID_REQUEST.name(), TtsMetrics.NONE);
         }
         return ResponseEntity.badRequest().body(new ErrorResponse(TtsErrorCode.INVALID_REQUEST.name(), message));

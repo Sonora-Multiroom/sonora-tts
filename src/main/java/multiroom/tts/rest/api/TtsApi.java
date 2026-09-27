@@ -1,35 +1,28 @@
-package multiroom.tts.rest;
+package multiroom.tts.rest.api;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import multiroom.tts.service.AnnounceCommand;
-import multiroom.tts.service.AnnounceResult;
-import multiroom.tts.service.TtsService;
-import org.springframework.http.HttpStatus;
+import multiroom.tts.rest.dto.ErrorResponse;
+import multiroom.tts.rest.dto.SpeakAcceptedResponse;
+import multiroom.tts.rest.dto.SpeakRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 
 /**
  * The external trigger for announcements. {@code /api/tts/**} is this module's own namespace —
  * {@code /api/v2/**} is {@code multiroom-rest}'s published contract and must not be touched here.
  * Adds no authentication of its own; the shared HTTP surface governs access.
  */
-@RestController
+@Tag(name = "TTS", description = "Text-to-speech announcements to an output or a group")
 @RequestMapping("/api/tts")
-public class TtsController {
-
-    private final TtsService ttsService;
-
-    public TtsController(TtsService ttsService) {
-        this.ttsService = ttsService;
-    }
+public interface TtsApi {
 
     @PostMapping("/speak")
     @Operation(summary = "Trigger a TTS announcement", operationId = "speak")
@@ -41,12 +34,5 @@ public class TtsController {
             @ApiResponse(responseCode = "503", description = "Provider unavailable, errored, or returned an unconvertible format",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    public ResponseEntity<SpeakAcceptedResponse> speak(@Valid @RequestBody SpeakRequest request) {
-        AnnounceResult result = ttsService.speak(new AnnounceCommand(
-                request.text(), request.targetName(), request.targetType(),
-                request.providerName(), request.voice(), request.language(),
-                request.engine(), request.pitch(), request.speakingRate(), request.stylePrompt()));
-        return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(new SpeakAcceptedResponse(result.announcementId(), result.cacheHit(), result.queueDepth()));
-    }
+    ResponseEntity<SpeakAcceptedResponse> speak(@Valid @RequestBody SpeakRequest request);
 }
