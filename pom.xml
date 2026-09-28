@@ -12,7 +12,7 @@
     <parent>
         <groupId>ai.multiroom</groupId>
         <artifactId>multiroom-extension-starter</artifactId>
-        <version>0.1.18</version>
+        <version>0.1.19</version>
         <relativePath/>
     </parent>
 
@@ -32,8 +32,10 @@
         <extension.id>tts</extension.id>
 
         <!-- The starter defaults this to ${project.version}, which now means *this extension's*
-             version. Pin the API version explicitly: it is what the JAR manifest advertises as
-             Require-API-Version, and what the host's compatibility check reads. -->
+             version. Pin the API version explicitly: it is the multiroom-api this extension compiles
+             against, and the lower bound of the Require-API-Version range the starter writes into
+             the manifest ([0.1.18,0.2.0)). Raise it only when the extension starts using newer API;
+             a core release alone does not need it. -->
         <multiroom.require_api_version>0.1.18</multiroom.require_api_version>
 
         <!-- The starter's `remote` profile (active by default) scp's the built JAR to
