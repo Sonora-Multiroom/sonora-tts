@@ -57,6 +57,9 @@ aborts with `multiroom-tts: playback.default-mode 'replace' is not one of duck-o
 3. Listen, and read `GET /api/v2/outputs/<output>/routes` while it plays.
 
 Expected:
+- a repeated announcement (`"cacheHit":true`) reaches `TTS_PLAYBACK_STARTED` in the extension's
+  log less than 1 s after the request's `TTS_REQUEST_RECEIVED`, the same as on an idle output
+  (SC-003) — compare the two log timestamps;
 - the music never goes silent, drops under the announcement and is back within ~1 s of its end,
   continuing from where it is (SC-001, SC-002);
 - during playback the routes list shows the music `LOWERED` and the `tts-…` route `FULL`;

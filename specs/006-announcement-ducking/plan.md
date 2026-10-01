@@ -170,9 +170,11 @@ amended to say a *refused* route's input is the one case this module does unregi
     `verifyNoMoreInteractions(routeService)` (no `stop*`, nothing on completion);
   - request `mix` overrides a configured default; configured `mix` used when the request names none;
   - unknown request mode → `INVALID_REQUEST`, provider and cache never touched, counted as rejected;
-  - same text in two modes → second request is a cache hit, one synthesis;
-  - `RouteAdmissionException` → playback failed counted once, resolver released, pin released,
-    temp file deleted, input unregistered, completion callback run, nothing else on `RouteService`;
+  - same text in two modes → the `CacheKey` passed to `audioCache.get` is equal both times;
+  - `RouteAdmissionException` → playback failed counted once, `completionListener.cancel(inputId)`
+    and `unregisterInput(inputId)` called, completion callback run (the queue moves on), nothing
+    else on `RouteService`. The listener is a mock there, so what `cancel` releases (pin, resolver
+    entry, temp file) is proven in `PlaybackCompletionListenerTest`;
   - enqueue failure → pin released, no `RouteService` call.
 - `PlaybackCompletionListenerTest`: completion and `cancel` release resources and make no
   `RouteService` call (constructor no longer takes one).
