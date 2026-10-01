@@ -23,7 +23,7 @@ class AnnouncementQueueManagerTest {
     private static AnnouncementTask dummyTask(String targetName) {
         UUID id = UUID.randomUUID();
         return new AnnouncementTask(id, InputId.of("tts-" + id), TargetType.SINGLE_OUTPUT, targetName,
-                Path.of("audio.wav"), false, List.of(), null);
+                Path.of("audio.wav"), false, multiroom.tts.config.PlaybackMode.DUCK_OTHERS, null);
     }
 
     @Test
