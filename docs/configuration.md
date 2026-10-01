@@ -312,6 +312,7 @@ every metric, the definition of billable usage, and example queries.
 | `cache.dir` | `${user.home}/.multiroom/tts-cache` | Cache root directory |
 | `cache.max-size-mb` | `500` | LRU-evicted once the cache exceeds this |
 | `queue.max-depth-per-target` | `10` | Max pending announcements per output/group |
+| `playback.default-mode` | `duck-others` | How an announcement joins what is playing: `duck-others` (lowers it) or `mix` (leaves it). Case-insensitive; anything else aborts start-up with `multiroom-tts: playback.default-mode '<value>' is not one of duck-others, mix` |
 | `voice-catalogue.ttl` | `24h` | `GOOGLE_CLOUD` only: how long a fetched voice list is trusted. Must be positive |
 | `voice-catalogue.failure-backoff` | `60s` | `GOOGLE_CLOUD` only: no fetch this long after a failed one. Must be positive |
 | `voice-catalogue.fetch-timeout` | `3s` | `GOOGLE_CLOUD` only: cap on one voice-list fetch. Must be positive |
@@ -415,6 +416,20 @@ providers:
     python-executable: /opt/piper-venv/bin/python3
     model-path: /opt/piper/models/en_US-ryan-medium.onnx
 ```
+
+## Playback over what is playing
+
+An announcement joins its target; it does not stop what plays there. With `duck-others` (the
+default) the host lowers the other routes for the length of the announcement and restores them
+afterwards; with `mix` they play on at their own level. A request chooses with `playbackMode`
+(`"duck-others"` or `"mix"`); any other value is `400 INVALID_REQUEST` before anything is
+synthesized. These host settings (in `multiroom.yml`, not this extension's) govern the result:
+
+| Host key | Default | Effect on announcements |
+|---|---|---|
+| `audio.mixing.ducking.level-db` | `-15.0` | How far the music drops under a `duck-others` announcement |
+| `audio.mixing.ducking.fade-millis` | `150` | The lowering and restoring ramp |
+| `audio.mixing.max-routes-per-output` | `4` | An announcement that would exceed it on any target output is refused: logged as `TTS_PLAYBACK_REFUSED`, counted as a failed playback and dropped, not retried |
 
 ## Triggering an announcement
 
