@@ -40,7 +40,7 @@ parent; Spring Boot 3.5, Micrometer and Lombok as before. No new dependency
 announcement's is created or stopped; no network work in `resolveSettings` (unchanged); no new
 metric tag key; no caller text in tags
 
-**Scale/Scope**: ~6 production classes changed, 2 added; ~5 test classes changed; 4 documents
+**Scale/Scope**: 9 production classes changed, 2 added; 6 test classes changed, 1 added; 4 documents
 
 ## Constitution Check
 
@@ -95,10 +95,12 @@ src/main/java/multiroom/tts/
 │   │                                     #   RouteAdmissionException → TTS_PLAYBACK_REFUSED WARN
 │   └── PlaybackCompletionListener.java   # - RouteService, - restoreRoutes; restore → release
 ├── rest/dto/SpeakRequest.java            # + playbackMode (String)
-└── rest/controller/TtsController.java    # pass playbackMode through
+├── rest/controller/TtsController.java    # pass playbackMode through
+└── TtsAutoConfiguration.java             # listener bean without RouteService
 src/test/java/multiroom/tts/
 ├── config/PlaybackModeTest.java          # NEW
 ├── config/TtsPropertiesValidationTest.java
+├── queue/AnnouncementQueueManagerTest.java   # new AnnouncementTask shape
 ├── service/TtsServiceTest.java
 ├── service/PlaybackCompletionListenerTest.java
 ├── rest/controller/TtsControllerTest.java

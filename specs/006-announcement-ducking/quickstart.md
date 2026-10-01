@@ -70,7 +70,11 @@ Expected:
 ## 5. Groups (story 2)
 
 Music on a group; announce to the group, then to one member. Expected: group announcement in sync
-and music lowered on every member; member announcement lowers that member only.
+and music lowered on every member; member announcement lowers that member only, and the music stays
+in sync on the other members.
+
+Then play different music on two members of the group and announce to the group. Expected: each
+member's own music is lowered under the announcement and restored afterwards.
 
 ## 6. Mix (story 4)
 
@@ -90,8 +94,12 @@ Expected:
   target starts. (Pin, resolver and temp-file release are not observable over HTTP; the unit tests
   cover them.)
 
-## 8. Shutdown and stop-all
+## 8. Stop-all
 
 During an announcement, stop all routes on the output (MQTT STOP or
 `DELETE /api/v2/outputs/<output>/routes`). Expected: the announcement ends with the music, the log
 shows `TTS_PLAYBACK_COMPLETED`, and nothing is recreated afterwards.
+
+Shutdown during an announcement is not checked here: its behaviour (finish the current one, discard
+the queue) is unchanged by this feature and covered by the existing queue tests; the only difference
+is that there is no longer anything to restore.
