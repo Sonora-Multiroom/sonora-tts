@@ -3,6 +3,7 @@ package multiroom.tts.queue;
 import multiroom.api.model.InputId;
 import multiroom.api.model.TargetType;
 import multiroom.tts.TtsErrorCode;
+import multiroom.tts.config.PlaybackMode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -23,7 +24,7 @@ class AnnouncementQueueManagerTest {
     private static AnnouncementTask dummyTask(String targetName) {
         UUID id = UUID.randomUUID();
         return new AnnouncementTask(id, InputId.of("tts-" + id), TargetType.SINGLE_OUTPUT, targetName,
-                Path.of("audio.wav"), false, multiroom.tts.config.PlaybackMode.DUCK_OTHERS, null);
+                Path.of("audio.wav"), false, PlaybackMode.DUCK_OTHERS, null);
     }
 
     @Test
