@@ -12,12 +12,12 @@
     <parent>
         <groupId>ai.multiroom</groupId>
         <artifactId>multiroom-extension-starter</artifactId>
-        <version>0.1.19</version>
+        <version>0.1.21</version>
         <relativePath/>
     </parent>
 
     <artifactId>multiroom-tts</artifactId>
-    <version>0.1.4</version>
+    <version>0.1.5</version>
     <packaging>jar</packaging>
     <name>multiroom-tts</name>
     <description>Text-to-Speech announcement extension for the multiroom audio system</description>
@@ -34,9 +34,9 @@
         <!-- The starter defaults this to ${project.version}, which now means *this extension's*
              version. Pin the API version explicitly: it is the multiroom-api this extension compiles
              against, and the lower bound of the Require-API-Version range the starter writes into
-             the manifest ([0.1.18,0.2.0)). Raise it only when the extension starts using newer API;
+             the manifest ([0.1.21,0.2.0)). Raise it only when the extension starts using newer API;
              a core release alone does not need it. -->
-        <multiroom.require_api_version>0.1.18</multiroom.require_api_version>
+        <multiroom.require_api_version>0.1.21</multiroom.require_api_version>
 
         <!-- The starter's `remote` profile (active by default) scp's the built JAR to
              multiroom.lan:/home/tiger/extensions. Child JARs opt in. -->

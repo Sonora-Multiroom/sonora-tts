@@ -1,10 +1,10 @@
 package multiroom.tts.service;
 
+import multiroom.api.exceptions.RouteAdmissionException;
 import multiroom.api.model.GroupId;
 import multiroom.api.model.InputId;
 import multiroom.api.model.OutputGroup;
 import multiroom.api.model.OutputId;
-import multiroom.api.model.Route;
 import multiroom.api.model.SampleFormat;
 import multiroom.api.model.TargetType;
 import multiroom.api.services.DeviceQueryService;
@@ -17,6 +17,7 @@ import multiroom.tts.audio.TtsInputResolver;
 import multiroom.tts.audio.WavFileWriter;
 import multiroom.tts.cache.AudioCache;
 import multiroom.tts.cache.CacheKey;
+import multiroom.tts.config.PlaybackMode;
 import multiroom.tts.cache.CacheWriteException;
 import multiroom.tts.config.TtsProperties;
 import multiroom.tts.metrics.SynthesisUsage;
@@ -38,14 +39,14 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
  * Orchestrates one announcement end to end: validate, resolve the target and provider, serve from
- * cache or synthesize and convert, snapshot and stop whatever is already playing on the target,
- * then hand the routing step to the per-target queue.
+ * cache or synthesize and convert, then hand the routing step to the per-target queue. The
+ * announcement joins its target alongside whatever already plays there, in duck-others or mix
+ * mode ({@link PlaybackMode}); the host lowers and restores the other routes.
  *
  * <p>The target's native audio format is fixed at {@link SampleFormat#standard()} — this module
  * has no per-output format lookup, so every announcement converts to the one system-wide native
@@ -53,7 +54,7 @@ import java.util.UUID;
  * own per-route conversion covers whatever gap remains for a differently configured output.
  *
  * <p>This class's own work ends at {@code queueManager.enqueue}: it does not block for playback,
- * does not restore routes and does not unregister the ephemeral input — {@link
+ * and does not unregister the ephemeral input — {@link
  * PlaybackCompletionListener} owns all three, because completion is only observable as {@code
  * RouteDestroyedEvent}.
  */
@@ -126,6 +127,7 @@ public class TtsService implements SmartLifecycle {
 
     private AnnounceResult announce(AnnounceCommand command) {
         validateText(command.text());
+        PlaybackMode playbackMode = resolvePlaybackMode(command.playbackMode());
         validateTargetExists(command.targetType(), command.targetName());
 
         String providerName = command.providerName() != null
@@ -174,27 +176,21 @@ public class TtsService implements SmartLifecycle {
             }
         }
 
-        List<Route> routeSnapshot = snapshotAndStopExistingRoutes(command.targetType(), command.targetName());
-
         UUID announcementId = UUID.randomUUID();
         InputId inputId = InputId.of("tts-" + announcementId);
         AnnouncementTask task = new AnnouncementTask(announcementId, inputId, command.targetType(),
-                command.targetName(), audioFile, temporaryFile, routeSnapshot,
-                temporaryFile ? null : cacheKey);
+                command.targetName(), audioFile, temporaryFile,
+                playbackMode, temporaryFile ? null : cacheKey);
 
         String queueKey = queueKey(command.targetType(), command.targetName());
         int queueDepth;
         try {
             queueDepth = queueManager.enqueue(queueKey, task);
         } catch (RuntimeException e) {
-            // The task was never handed to the queue, so nothing will ever restore this
+            // The task was never handed to the queue, so nothing will ever release this
             // reservation via RouteDestroyedEvent — release it here instead of leaking it
             // for the life of the process (a permanently pinned cache entry, or an orphaned
-            // spill file outside the cache directory). The target's own routes were already
-            // stopped a few lines above for an announcement that will now never play, so they
-            // must come back too — otherwise the target stays silent until an unrelated route
-            // command arrives.
-            completionListener.restoreRoutes(routeSnapshot, announcementId);
+            // spill file outside the cache directory). No route was touched, so none needs restoring.
             if (temporaryFile) {
                 deleteQuietly(audioFile);
             } else {
@@ -272,30 +268,50 @@ public class TtsService implements SmartLifecycle {
         deviceRegistryService.registerInput(input);
         completionListener.track(task, onPlaybackComplete);
         try {
+            var joinMode = task.playbackMode().joinMode();
             if (task.targetType() == TargetType.SINGLE_OUTPUT) {
-                routeService.createRoute(task.inputId(), OutputId.of(task.targetName()));
+                routeService.createRoute(task.inputId(), OutputId.of(task.targetName()), joinMode);
             } else {
-                routeService.createRoute(task.inputId(), GroupId.of(task.targetName()));
+                routeService.createRoute(task.inputId(), GroupId.of(task.targetName()), joinMode);
             }
             metrics.playbackStarted();
             log.info("TTS_PLAYBACK_STARTED announcementId={} target={}", task.announcementId(), task.targetName());
+        } catch (RouteAdmissionException e) {
+            // The host's own limits (route cap, input already on the output) — an expected
+            // refusal, not a fault, so no stack trace.
+            log.warn("TTS_PLAYBACK_REFUSED announcementId={} target={} output={} reason={}",
+                    task.announcementId(), task.targetName(), e.getOutputId(), e.getReason());
+            abandon(task, onPlaybackComplete);
         } catch (RuntimeException e) {
-            metrics.playbackFailed();
             log.error("Failed to create route for announcement {} on target {}",
                     task.announcementId(), task.targetName(), e);
-            // No route was created, so RouteDestroyedEvent will never arrive for this input —
-            // cancel() runs the same cleanup onRouteDestroyed would (restoring the snapshotted
-            // routes, unpinning the cache entry, releasing the resolver mapping, deleting any
-            // temp file) instead of leaking all four for the life of the process.
-            completionListener.cancel(task.inputId());
-            try {
-                deviceRegistryService.unregisterInput(task.inputId());
-            } catch (RuntimeException unregisterFailure) {
-                log.warn("Failed to unregister ephemeral input {} after failed route creation",
-                        task.inputId(), unregisterFailure);
-            }
-            onPlaybackComplete.run();
+            abandon(task, onPlaybackComplete);
         }
+    }
+
+    /**
+     * Drops an announcement whose route was never created. It is not retried: a late announcement
+     * is worse than none. Unregistering the input is right here, and only here: no route exists,
+     * so core will never auto-remove it.
+     */
+    private void abandon(AnnouncementTask task, Runnable onPlaybackComplete) {
+        metrics.playbackFailed();
+        completionListener.cancel(task.inputId());
+        try {
+            deviceRegistryService.unregisterInput(task.inputId());
+        } catch (RuntimeException unregisterFailure) {
+            log.warn("Failed to unregister ephemeral input {} after failed route creation",
+                    task.inputId(), unregisterFailure);
+        }
+        onPlaybackComplete.run();
+    }
+
+    private PlaybackMode resolvePlaybackMode(String requested) {
+        if (requested == null) {
+            return properties.getPlayback().resolvedDefaultMode();
+        }
+        return PlaybackMode.fromName(requested).orElseThrow(() -> new TtsException(TtsErrorCode.INVALID_REQUEST,
+                "Unknown playbackMode '" + requested + "'. Supported: " + PlaybackMode.supportedList()));
     }
 
     private void validateText(String text) {
@@ -323,13 +339,6 @@ public class TtsService implements SmartLifecycle {
                         "Output group '" + targetName + "' has no outputs");
             }
         }
-    }
-
-    private List<Route> snapshotAndStopExistingRoutes(TargetType targetType, String targetName) {
-        if (targetType == TargetType.SINGLE_OUTPUT) {
-            return routeService.stopRoutesByOutput(OutputId.of(targetName));
-        }
-        return routeService.stopRoutesByGroup(GroupId.of(targetName));
     }
 
     private Path spillToTempFile(byte[] pcm) {

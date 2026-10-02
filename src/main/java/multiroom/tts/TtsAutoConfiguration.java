@@ -108,9 +108,9 @@ public class TtsAutoConfiguration {
     }
 
     @Bean
-    public PlaybackCompletionListener playbackCompletionListener(RouteService routeService, AudioCache audioCache,
+    public PlaybackCompletionListener playbackCompletionListener(AudioCache audioCache,
                                                                    TtsInputResolver ttsInputResolver) {
-        return new PlaybackCompletionListener(routeService, audioCache, ttsInputResolver);
+        return new PlaybackCompletionListener(audioCache, ttsInputResolver);
     }
 
     @Bean

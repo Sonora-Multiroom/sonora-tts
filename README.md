@@ -31,10 +31,12 @@ ordinary dependency injection. It runs no web server of its own and ships no cop
   accident
 - Disk cache keyed by text + provider/model + voice/language (+ style prompt, when one is in
   effect) + audio format, surviving restarts, LRU-evicted at a configurable size
-- Playback through an ephemeral registered input; the target's prior state is restored when the
-  host destroys the announcement's route
+- Playback through an ephemeral registered input that **joins** its target: whatever is already
+  playing there keeps playing, lowered under the announcement (`duck-others`, the default) or left
+  as it is (`mix`). The host lowers and restores the level; nothing is stopped or recreated. A
+  request may choose with `playbackMode`, and `multiroom.tts.playback.default-mode` sets the default
 
-Status: **implemented, `mvn verify` green**, at version 0.1.3 with features 001 to 004. See the
+Status: **implemented, `mvn verify` green**, at version 0.1.5 with features 001 to 006. See the
 master [spec](.specify/memory/spec.md) for what it does today, [plan](.specify/memory/plan.md) for
 how it is built, and [changelog](.specify/memory/changelog.md) for each feature and its open tasks
 (001's timings and Pi end-to-end run still need real audio hardware).
@@ -70,6 +72,10 @@ GET /actuator/extensions      →  tts, with the expected version, not REJECTED
 
 That check is the second half of the merge gate: a green local build proves the module compiles,
 not that it loads.
+
+**Deployment order.** Version 0.1.5 needs `multiroom-api` 0.1.21 (`Require-API-Version:
+[0.1.21,0.2.0)`): deploy a host built with it first, then this JAR. A level and fade for the
+lowered music are the host's `audio.mixing.ducking.*` settings, not this extension's.
 
 ## Configuration
 

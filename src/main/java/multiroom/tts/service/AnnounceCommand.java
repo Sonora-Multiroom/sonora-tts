@@ -8,14 +8,23 @@ import multiroom.api.model.TargetType;
  *
  * @param stylePrompt {@code google-gemini} only. {@code null} = not given; empty or whitespace =
  *                    no prompt for this announcement
+ * @param playbackMode {@code null} = not given, so the configured default applies
  */
 public record AnnounceCommand(String text, String targetName, TargetType targetType, String providerName,
                                String voice, String language, String engine, Double pitch,
-                               Double speakingRate, String stylePrompt) {
+                               Double speakingRate, String stylePrompt, String playbackMode) {
 
     /** The pre-004 shape, for every caller that never sends a style prompt. */
     public AnnounceCommand(String text, String targetName, TargetType targetType, String providerName,
                            String voice, String language, String engine, Double pitch, Double speakingRate) {
-        this(text, targetName, targetType, providerName, voice, language, engine, pitch, speakingRate, null);
+        this(text, targetName, targetType, providerName, voice, language, engine, pitch, speakingRate, null, null);
+    }
+
+    /** The pre-006 shape, for every caller that never names a playback mode. */
+    public AnnounceCommand(String text, String targetName, TargetType targetType, String providerName,
+                           String voice, String language, String engine, Double pitch, Double speakingRate,
+                           String stylePrompt) {
+        this(text, targetName, targetType, providerName, voice, language, engine, pitch, speakingRate,
+                stylePrompt, null);
     }
 }

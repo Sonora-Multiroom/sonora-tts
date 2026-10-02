@@ -13,6 +13,9 @@ import multiroom.api.model.TargetType;
  * accepted by {@code google-cloud} and {@code google-gemini}; {@code stylePrompt} is
  * {@code google-gemini} only. Each provider rejects a field it does not support, and range-checks
  * the ones it does, itself.
+ *
+ * <p>{@code playbackMode} is optional: {@code duck-others} or {@code mix}. {@code TtsService}
+ * checks it, so an unknown value answers {@code INVALID_REQUEST} before any synthesis.
  */
 public record SpeakRequest(
         @NotBlank(message = "Text must not be blank") String text,
@@ -24,5 +27,6 @@ public record SpeakRequest(
         String engine,
         Double pitch,
         Double speakingRate,
-        String stylePrompt) {
+        String stylePrompt,
+        String playbackMode) {
 }

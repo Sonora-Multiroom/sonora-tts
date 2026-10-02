@@ -113,7 +113,9 @@ target's first accepted announcement and stays, reading 0 once its queue drains.
 ### `tts_playbacks_total` (counter)
 
 One increment per announcement taken off its queue to play. Tag `outcome`: `started` (its route
-was created) or `failed` (it could not start).
+was created) or `failed` (it could not start). `failed` includes an announcement the host
+refused, for instance at its route limit: it is dropped, not retried, and logged as
+`TTS_PLAYBACK_REFUSED` with the host's reason and the output.
 
 ## Billable usage
 
