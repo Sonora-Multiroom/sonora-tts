@@ -282,7 +282,9 @@ over music, and confirm the music level does not change.
 - **Refusals happen after the request was accepted.** Routing runs when the announcement reaches the
   front of its queue, after the caller has had its success response, so a host refusal is reported in
   logs and metrics, not to the caller. Predicting a refusal at request time would be racy and is out
-  of scope.
+  of scope. A known issue: a full room still gets `202`. A later feature may refuse at request time
+  when the target's queue is empty and an output is already at the host's route limit, which needs
+  that limit in multiroom-api first.
 - **Deployment order**: the host (multiroom-ai with 023) is upgraded first, then this JAR is
   redeployed; the starter parent and the API requirement move to 0.1.21 together.
 - **Audible behaviour is verified on the production device** after deployment, as for earlier
