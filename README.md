@@ -35,9 +35,12 @@ ordinary dependency injection. It runs no web server of its own and ships no cop
   playing there keeps playing, lowered under the announcement (`duck-others`, the default) or left
   as it is (`mix`). The host lowers and restores the level; nothing is stopped or recreated. A
   request may choose with `playbackMode`, and `multiroom.tts.playback.default-mode` sets the default
+- `tts_*` metrics in the host's `/actuator/prometheus`: announcements, synthesis time and billable
+  characters per provider, cache hits, queue depth and playbacks
 
 Status: **implemented, `mvn verify` green**, at version 0.1.5 with features 001 to 006. See the
-master [spec](.specify/memory/spec.md) for what it does today, [plan](.specify/memory/plan.md) for
+master [spec](.specify/memory/spec.md) for what it does today (005 and 006 are not merged into it
+yet; their specs are under [specs/](specs/)), [plan](.specify/memory/plan.md) for
 how it is built, and [changelog](.specify/memory/changelog.md) for each feature and its open tasks
 (001's timings and Pi end-to-end run still need real audio hardware).
 
@@ -51,7 +54,7 @@ how it is built, and [changelog](.specify/memory/changelog.md) for each feature 
   mvn -pl multiroom-api,multiroom-extension-starter -am install
   ```
   Nothing is published to a remote repository — the local Maven repository is the distribution
-  channel. This repository currently builds against **multiroom-api 0.1.18**.
+  channel. This repository currently builds against **multiroom-api 0.1.21**.
 
 ## Build and deploy
 
@@ -94,6 +97,7 @@ examples for every provider type, and how to trigger an announcement and manage 
 |---|---|
 | [docs/configuration.md](docs/configuration.md) | How to configure providers, cache and queue; triggering announcements |
 | [docs/metrics.md](docs/metrics.md) | The metrics in the host's `/actuator/prometheus`: what each counts, billable usage, example queries |
+| [docs/known-issues.md](docs/known-issues.md) | Behaviour accepted for now: symptom, what to look for, possible fix |
 | [docs/google-cloud-tts-setup.md](docs/google-cloud-tts-setup.md) | Setting up Google Cloud: billing, the API, an API key or a service account key, and Gemini voices (`google-gemini`) |
 | [AGENTS.md](AGENTS.md) | How to work in this repository, and the rules across the repo boundary |
 | [.specify/memory/constitution.md](.specify/memory/constitution.md) | Engineering principles, the merge gate, the extension boundary |
@@ -101,5 +105,7 @@ examples for every provider type, and how to trigger an announcement and manage 
 | [.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) | The feature: spec, plan, tasks, contracts |
 | [.specify/archive/002-google-voice-selection/](.specify/archive/002-google-voice-selection/) | Google Cloud voice selection |
 | [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) | Google Cloud service account authentication |
-| [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) | Gemini TTS provider (`google-gemini`); its REST contract (v0.1.3) is the current one |
+| [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) | Gemini TTS provider (`google-gemini`) |
+| [specs/005-tts-metrics/](specs/005-tts-metrics/) | TTS metrics |
+| [specs/006-announcement-ducking/](specs/006-announcement-ducking/) | Announcements that join the target (`duck-others`, `mix`); its REST contract (v0.1.5) is the current one |
 | [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |
