@@ -53,6 +53,8 @@ public class TtsProperties {
 
     private QueueProperties queue = new QueueProperties();
 
+    private PlaybackProperties playback = new PlaybackProperties();
+
     private VoiceCatalogueProperties voiceCatalogue = new VoiceCatalogueProperties();
 
     @PostConstruct
@@ -66,6 +68,11 @@ public class TtsProperties {
         requirePositive("voice-catalogue.ttl", voiceCatalogue.getTtl());
         requirePositive("voice-catalogue.failure-backoff", voiceCatalogue.getFailureBackoff());
         requirePositive("voice-catalogue.fetch-timeout", voiceCatalogue.getFetchTimeout());
+
+        if (PlaybackMode.fromName(playback.getDefaultMode()).isEmpty()) {
+            throw fault("playback.default-mode '" + playback.getDefaultMode() + "' is not one of "
+                    + PlaybackMode.supportedList());
+        }
 
         Set<String> seenNames = new HashSet<>();
         Set<String> enabledNames = new HashSet<>();

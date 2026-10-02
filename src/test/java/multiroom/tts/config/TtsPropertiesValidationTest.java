@@ -192,6 +192,61 @@ class TtsPropertiesValidationTest {
         assertThat(properties.getProviders()).isEmpty();
     }
 
+    // --- 006: playback mode ------------------------------------------------------------------
+
+    private static TtsProperties validProperties() {
+        TtsProviderConfig openai = new TtsProviderConfig();
+        openai.setName("openai");
+        openai.setType(ProviderType.OPENAI);
+        openai.setApiKey("sk-test");
+        TtsProperties properties = new TtsProperties();
+        properties.setProviders(List.of(openai));
+        return properties;
+    }
+
+    @Test
+    void playbackDefaultsToDuckOthers() {
+        TtsProperties properties = validProperties();
+
+        properties.validate();
+
+        assertThat(properties.getPlayback().resolvedDefaultMode()).isEqualTo(PlaybackMode.DUCK_OTHERS);
+    }
+
+    @Test
+    void mixIsAcceptedAsTheDefaultModeInAnyCase() {
+        for (String value : List.of("mix", "MIX")) {
+            TtsProperties properties = validProperties();
+            properties.getPlayback().setDefaultMode(value);
+
+            properties.validate();
+
+            assertThat(properties.getPlayback().resolvedDefaultMode()).isEqualTo(PlaybackMode.MIX);
+        }
+    }
+
+    @Test
+    void anUnknownDefaultModeAbortsStartUp() {
+        for (String value : List.of("replace", "duck_others", "louder")) {
+            TtsProperties properties = validProperties();
+            properties.getPlayback().setDefaultMode(value);
+
+            assertThatThrownBy(properties::validate)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("multiroom-tts: playback.default-mode '" + value
+                            + "' is not one of duck-others, mix");
+        }
+    }
+
+    @Test
+    void anInvalidDefaultModeIsIgnoredWhenDisabled() {
+        TtsProperties properties = new TtsProperties();
+        properties.setEnabled(false);
+        properties.getPlayback().setDefaultMode("replace");
+
+        properties.validate();
+    }
+
     // --- 002: google-cloud entries -----------------------------------------------------------
 
     private static TtsProviderConfig google(String engine, String language, String voice) {
