@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-01
 
-**Status**: Draft
+**Status**: Completed
 
 **Input**: User description (implied by the upstream specification handed over with the command):
 "multiroom-ai 023 (`023-multi-route-output-mixing`, multiroom-api 0.1.21) lets several routes play on
