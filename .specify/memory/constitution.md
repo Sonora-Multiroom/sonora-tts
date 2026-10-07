@@ -30,6 +30,12 @@ Sync Impact Report:
   `multiroom-api`; other libraries the host supplies on the shared classpath (e.g. Micrometer,
   used from 005-tts-metrics) are depended on at `provided` scope and never bundled
 - Templates requiring updates: none
+
+- Version: 1.0.3 (patch — clarification, no principle added, removed or redefined)
+- Upstream Contract: the host checkout moved from `D:\projects-multiroom\multiroom-ai` to
+  `D:\projects-sonora\sonora-multiroom`; repointed the path (the "Derived from" line above keeps the
+  path as it was at ratification)
+- Templates requiring updates: none
 -->
 
 # Sonora TTS Constitution
@@ -178,7 +184,7 @@ build — it fails someone's audio system at start-up.
 
 ## Upstream Contract
 
-- The host repository is `multiroom-ai`, available locally at `D:\projects-multiroom\multiroom-ai`.
+- The host repository is `multiroom-ai`, available locally at `D:\projects-sonora\sonora-multiroom`.
   It is **read-only from here**: an API change is made there, on its own branch, verified there and
   released there
 - `ai.multiroom:multiroom-api` and `ai.multiroom:multiroom-extension-starter` are resolved from the
@@ -214,4 +220,4 @@ build — it fails someone's audio system at start-up.
 - Where the two conflict on anything inside this repository, **this one wins** — it was written
   knowing there is no reactor here
 
-**Version**: 1.0.2 | **Ratified**: 2026-09-20 | **Last Amended**: 2026-09-26
+**Version**: 1.0.3 | **Ratified**: 2026-09-20 | **Last Amended**: 2026-10-10

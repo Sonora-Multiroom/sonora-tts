@@ -13,7 +13,7 @@ route plays. Its spec names this extension as the intended first adopter. Make a
 over whatever the room is doing — music lowered, never stopped — instead of stopping the target's
 routes and recreating them afterwards."
 
-**Upstream reference**: `D:\projects-multiroom\multiroom-ai\specs\023-multi-route-output-mixing\`
+**Upstream reference**: `D:\projects-sonora\sonora-multiroom\specs\023-multi-route-output-mixing\`
 (spec, plan, research R6–R12, `contracts/java-api.md`). This feature consumes it; it changes nothing
 upstream.
 
