@@ -50,7 +50,7 @@ how it is built, and [changelog](.specify/memory/changelog.md) for each feature 
 - Maven
 - A local checkout of `multiroom-ai`, with its API installed into `~/.m2`:
   ```powershell
-  cd D:\projects-multiroom\multiroom-ai
+  cd D:\projects-sonora\sonora-multiroom
   mvn -pl multiroom-api,multiroom-extension-starter -am install
   ```
   Nothing is published to a remote repository — the local Maven repository is the distribution

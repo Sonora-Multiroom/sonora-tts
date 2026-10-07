@@ -13,7 +13,7 @@ registering an ephemeral input and routing it.
 - **Artifact**: `ai.multiroom:multiroom-tts`, package `multiroom.tts`, extension id `tts`
 - **Build**: Maven (`mvn`), no module list — this repository is a single module
 
-## Upstream: multiroom-ai (D:\projects-multiroom\multiroom-ai)
+## Upstream: multiroom-ai (D:\projects-sonora\sonora-multiroom)
 
 This repository builds one extension; the host, the contract and the parent POM live in the sibling
 repository, which is available locally. **Read it when you need to know how the core behaves. Never

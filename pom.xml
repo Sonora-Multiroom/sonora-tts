@@ -46,7 +46,7 @@
              sibling of the module inside the monorepo. Outside it, point at the host checkout's
              extensions directory. Override on the command line for a different checkout:
              mvn deploy -Plocal -Dmultiroom.local-extensions-dir=... -->
-        <multiroom.local-extensions-dir>D:/projects-multiroom/multiroom-ai/extensions</multiroom.local-extensions-dir>
+        <multiroom.local-extensions-dir>D:/projects-sonora/sonora-multiroom/extensions</multiroom.local-extensions-dir>
     </properties>
 
     <dependencies>
