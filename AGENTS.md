@@ -39,9 +39,10 @@ edit it from here.**
 3. After the host is rebuilt, rebuild and redeploy this JAR. Incompatibility shows up only at
    runtime (`Require-API-Version` → `SemanticVersion.isCompatibleWith`), and a stale JAR beside a
    rebuilt core is a known silent failure (2026-09-13: all four extensions dropped out at once).
-4. `multiroom.lan` is **production**. Reading `~/multiroom.yml` over SSH is pre-authorised:
+4. `multiroom.lan` is **production**. Read-only inspection over SSH is pre-authorised (config, logs,
+   `systemctl status`, `jcmd`), for example
    `ssh -o BatchMode=yes -o ConnectTimeout=10 tiger@multiroom.lan 'cat /home/tiger/multiroom.yml'`.
-   Writes, restarts and `systemctl` need the user's permission each time.
+   Anything that writes, restarts, deploys or controls the service needs the user's permission each time.
 
 ## Commands
 
