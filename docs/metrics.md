@@ -115,7 +115,10 @@ target's first accepted announcement and stays, reading 0 once its queue drains.
 One increment per announcement taken off its queue to play. Tag `outcome`: `started` (its route
 was created) or `failed` (it could not start). `failed` includes an announcement the host
 refused, for instance at its route limit: it is dropped, not retried, and logged as
-`TTS_PLAYBACK_REFUSED` with the host's reason and the output.
+`TTS_PLAYBACK_REFUSED` with the host's reason and the output. An announcement whose route was
+admitted but failed to start is `failed` too, never `started`, and is logged as
+`TTS_PLAYBACK_FAILED` with the exception. Each announcement taken off a queue is counted exactly
+once, so `started + failed` equals the announcements taken off queues.
 
 ## Billable usage
 

@@ -10,6 +10,7 @@ import multiroom.api.model.GroupId;
 import multiroom.api.model.InputId;
 import multiroom.api.model.OutputGroup;
 import multiroom.api.model.OutputId;
+import multiroom.api.events.RouteDestroyedEvent;
 import multiroom.api.exceptions.RouteAdmissionException;
 import multiroom.api.exceptions.RouteException;
 import multiroom.api.model.Route;
@@ -51,6 +52,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.mockito.stubbing.Answer;
 
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioFormat;
@@ -124,6 +126,8 @@ class TtsServiceTest {
         audioCache = mock(AudioCache.class);
         inputResolver = mock(TtsInputResolver.class);
         completionListener = mock(PlaybackCompletionListener.class);
+        // A mocked listener answers false; the failure tests model "the failure path removed the entry".
+        when(completionListener.cancel(any(InputId.class))).thenReturn(true);
         openaiProvider = mock(TtsProvider.class);
         piperProvider = mock(TtsProvider.class);
 
@@ -1057,6 +1061,7 @@ class TtsServiceTest {
 
         assertThat(events).anySatisfy(e -> {
             assertThat(e.getLevel()).isEqualTo(ch.qos.logback.classic.Level.ERROR);
+            assertThat(e.getFormattedMessage()).startsWith("TTS_PLAYBACK_FAILED");
             assertThat(e.getThrowableProxy()).isNotNull();
         });
         assertThat(events).noneMatch(e -> e.getFormattedMessage().startsWith("TTS_PLAYBACK_REFUSED"));
@@ -1086,18 +1091,241 @@ class TtsServiceTest {
     }
 
     private List<ch.qos.logback.classic.spi.ILoggingEvent> captureServiceLog(Runnable action) {
-        ch.qos.logback.classic.Logger logger =
-                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(TtsService.class);
+        return captureLog(action, TtsService.class);
+    }
+
+    private List<ch.qos.logback.classic.spi.ILoggingEvent> captureLog(Runnable action, Class<?>... loggers) {
         ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs =
                 new ch.qos.logback.core.read.ListAppender<>();
         logs.start();
-        logger.addAppender(logs);
+        List<ch.qos.logback.classic.Logger> attached = new java.util.ArrayList<>();
+        for (Class<?> type : loggers) {
+            ch.qos.logback.classic.Logger logger =
+                    (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(type);
+            logger.addAppender(logs);
+            attached.add(logger);
+        }
         try {
             action.run();
         } finally {
-            logger.detachAppender(logs);
+            attached.forEach(logger -> logger.detachAppender(logs));
         }
         return List.copyOf(logs.list);
+    }
+
+    // --- 007: a failed start ends once, as a failure ---------------------------------------------
+
+    /** The hub 0.1.22 ordering: a destroyed route that never went live is published, then createRoute throws. */
+    private Answer<Route> failAfterAdmission(PlaybackCompletionListener listener, List<InputId> seen) {
+        return invocation -> {
+            InputId input = invocation.getArgument(0);
+            seen.add(input);
+            Route neverStarted = Route.builder().routeId(RouteId.of("route-living-room")).inputId(input)
+                    .targetType(TargetType.SINGLE_OUTPUT).targetId("living-room").status(RouteStatus.STOPPING)
+                    .createdAt(Instant.now()).build();
+            listener.onRouteDestroyed(new RouteDestroyedEvent(neverStarted));
+            throw new RouteException("device would not open");
+        };
+    }
+
+    private Answer<Route> succeedAndRecord(List<InputId> seen) {
+        return invocation -> {
+            seen.add(invocation.getArgument(0));
+            return aRoute("living-room");
+        };
+    }
+
+    private PlaybackCompletionListener useRealListener() {
+        PlaybackCompletionListener real = new PlaybackCompletionListener(audioCache, inputResolver);
+        completionListener = real;
+        return real;
+    }
+
+    private static boolean startsWith(ch.qos.logback.classic.spi.ILoggingEvent event, String prefix) {
+        return event.getFormattedMessage().startsWith(prefix);
+    }
+
+    @Test
+    void aStartThatFailsAfterAdmissionIsReportedOnceAsAFailure() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        PlaybackCompletionListener listener = useRealListener();
+        List<InputId> seen = new java.util.concurrent.CopyOnWriteArrayList<>();
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+                .thenAnswer(failAfterAdmission(listener, seen));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events = captureLog(() -> {
+            service.speak(speakTo("living-room", null));
+            verify(deviceRegistryService, timeout(ASYNC_TIMEOUT_MS)).unregisterInput(any(InputId.class));
+        }, TtsService.class, PlaybackCompletionListener.class);
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> failed =
+                events.stream().filter(e -> startsWith(e, "TTS_PLAYBACK_FAILED")).toList();
+        assertThat(failed).hasSize(1);
+        assertThat(failed.get(0).getLevel()).isEqualTo(ch.qos.logback.classic.Level.ERROR);
+        assertThat(failed.get(0).getThrowableProxy()).isNotNull();
+        assertThat(failed.get(0).getFormattedMessage()).contains("announcementId=", "target=living-room");
+        assertThat(events).noneMatch(e -> startsWith(e, "TTS_PLAYBACK_COMPLETED"));
+        assertThat(events).noneMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN);
+        verify(metrics, times(1)).playbackFailed();
+        verify(metrics, never()).playbackStarted();
+        verify(deviceRegistryService, times(1)).unregisterInput(seen.get(0));
+    }
+
+    @Test
+    void anAlreadyRemovedInputAfterAFailedStartIsNotAWarning() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+                .thenThrow(new RouteException("output disappeared"));
+        doThrow(new IllegalArgumentException("Input 'tts-x' is not registered"))
+                .when(deviceRegistryService).unregisterInput(any(InputId.class));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events = captureServiceLog(() -> {
+            service.speak(speakTo("living-room", null));
+            verify(deviceRegistryService, timeout(ASYNC_TIMEOUT_MS)).unregisterInput(any(InputId.class));
+            verify(completionListener, timeout(ASYNC_TIMEOUT_MS)).cancel(any(InputId.class));
+        });
+
+        assertThat(events).noneMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN);
+    }
+
+    @Test
+    void anUnexpectedUnregisterFailureAfterAFailedStartIsStillAWarning() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+                .thenThrow(new RouteException("output disappeared"));
+        doThrow(new IllegalStateException("boom")).when(deviceRegistryService).unregisterInput(any(InputId.class));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events = captureServiceLog(() -> {
+            service.speak(speakTo("living-room", null));
+            verify(completionListener, timeout(ASYNC_TIMEOUT_MS)).cancel(any(InputId.class));
+        });
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> warnings = events.stream()
+                .filter(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN).toList();
+        assertThat(warnings).hasSize(1);
+        assertThat(warnings.get(0).getThrowableProxy()).isNotNull();
+    }
+
+    @Test
+    void aStartThatFailsAfterAdmissionMovesTheQueueOnOnce() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        PlaybackCompletionListener listener = useRealListener();
+        List<InputId> seen = new java.util.concurrent.CopyOnWriteArrayList<>();
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+                .thenAnswer(failAfterAdmission(listener, seen))
+                .thenAnswer(succeedAndRecord(seen));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        service.speak(speakTo("living-room", null));
+        service.speak(speakTo("living-room", null));
+
+        verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
+                eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+        verify(metrics, timeout(ASYNC_TIMEOUT_MS).times(1)).playbackStarted();
+        verify(metrics, times(1)).playbackFailed();
+        verify(audioCache, times(1)).unpin(any(CacheKey.class));
+        verify(inputResolver, times(1)).release(any(UUID.class));
+        verify(deviceRegistryService, times(1)).unregisterInput(seen.get(0));
+    }
+
+    @Test
+    void abandonDoesNotSignalTheQueueWhenTheEndWasAlreadyHandled() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        when(completionListener.cancel(any(InputId.class))).thenReturn(false);
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+                .thenThrow(new RouteException("device would not open"));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        service.speak(speakTo("living-room", null));
+        service.speak(speakTo("living-room", null));
+
+        verify(routeService, after(300).times(1)).createRoute(any(InputId.class),
+                eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+        verify(metrics, times(1)).playbackFailed();
+        verify(deviceRegistryService, times(1)).unregisterInput(any(InputId.class));
+    }
+
+    @Test
+    void aStartThatFailsOnAnOlderHubWithoutAnEventIsReportedTheSame() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        useRealListener();
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+                .thenThrow(new RouteException("device would not open"))
+                .thenReturn(aRoute("living-room"));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events = captureLog(() -> {
+            service.speak(speakTo("living-room", null));
+            service.speak(speakTo("living-room", null));
+            verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
+                    eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+            verify(metrics, timeout(ASYNC_TIMEOUT_MS)).playbackStarted();
+        }, TtsService.class, PlaybackCompletionListener.class);
+
+        assertThat(events.stream().filter(e -> startsWith(e, "TTS_PLAYBACK_FAILED"))).hasSize(1);
+        assertThat(events).noneMatch(e -> startsWith(e, "TTS_PLAYBACK_COMPLETED"));
+        verify(metrics, times(1)).playbackFailed();
+        verify(deviceRegistryService, times(1)).unregisterInput(any(InputId.class));
+    }
+
+    @Test
+    void aRouteThatEndsBeforeCreateRouteReturnsIsCompleted() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        PlaybackCompletionListener listener = useRealListener();
+        Answer<Route> endsImmediately = invocation -> {
+            InputId input = invocation.getArgument(0);
+            Route finished = Route.builder().routeId(RouteId.of("route-living-room")).inputId(input)
+                    .targetType(TargetType.SINGLE_OUTPUT).targetId("living-room").status(RouteStatus.STOPPING)
+                    .createdAt(Instant.now()).startedAt(Instant.now()).build();
+            listener.onRouteDestroyed(new RouteDestroyedEvent(finished));
+            return finished;
+        };
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+                .thenAnswer(endsImmediately)
+                .thenReturn(aRoute("living-room"));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events = captureLog(() -> {
+            service.speak(speakTo("living-room", null));
+            service.speak(speakTo("living-room", null));
+            verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
+                    eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+        }, TtsService.class, PlaybackCompletionListener.class);
+
+        assertThat(events).anyMatch(e -> startsWith(e, "TTS_PLAYBACK_STARTED"));
+        assertThat(events).anyMatch(e -> startsWith(e, "TTS_PLAYBACK_COMPLETED"));
+        verify(metrics, never()).playbackFailed();
+        verify(deviceRegistryService, never()).unregisterInput(any(InputId.class));
+    }
+
+    @Test
+    void aRefusalWithTheRealListenerReleasesOnceAndMovesTheQueueOn() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        useRealListener();
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+                .thenThrow(refusal("living-room"))
+                .thenReturn(aRoute("living-room"));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events = captureLog(() -> {
+            service.speak(speakTo("living-room", null));
+            service.speak(speakTo("living-room", null));
+            verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
+                    eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+        }, TtsService.class, PlaybackCompletionListener.class);
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> refused =
+                events.stream().filter(e -> startsWith(e, "TTS_PLAYBACK_REFUSED")).toList();
+        assertThat(refused).hasSize(1);
+        assertThat(refused.get(0).getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+        assertThat(refused.get(0).getThrowableProxy()).isNull();
+        assertThat(events).noneMatch(e -> startsWith(e, "TTS_PLAYBACK_FAILED"));
+        assertThat(events).noneMatch(e -> startsWith(e, "TTS_PLAYBACK_COMPLETED"));
+        verify(metrics, times(1)).playbackFailed();
+        verify(deviceRegistryService, times(1)).unregisterInput(any(InputId.class));
     }
 
     private static AnnounceCommand speakWithMode(String mode) {

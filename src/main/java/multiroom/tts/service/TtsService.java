@@ -283,27 +283,42 @@ public class TtsService implements SmartLifecycle {
                     task.announcementId(), task.targetName(), e.getOutputId(), e.getReason());
             abandon(task, onPlaybackComplete);
         } catch (RuntimeException e) {
-            log.error("Failed to create route for announcement {} on target {}",
+            log.error("TTS_PLAYBACK_FAILED announcementId={} target={}",
                     task.announcementId(), task.targetName(), e);
             abandon(task, onPlaybackComplete);
         }
     }
 
     /**
-     * Drops an announcement whose route was never created. It is not retried: a late announcement
-     * is worse than none. Unregistering the input is right here, and only here: no route exists,
-     * so core will never auto-remove it.
+     * Ends an announcement whose route was refused or failed to start. It is not retried: a late
+     * announcement is worse than none. This path owns the end of such an announcement in both hub
+     * orders: on 0.1.22 and later the hub publishes a {@code RouteDestroyedEvent} without a start
+     * time for an admitted route that failed to start before {@code createRoute} throws, and the
+     * listener leaves it tracked for {@code cancel} here; on 0.1.21 a failed start usually
+     * publishes no event, and a refusal never does.
+     *
+     * <p>Unregistering the input is this path's job too: the hub auto-removes an {@code autoRemove}
+     * input only after a route on it went live. An input that is already gone is tolerated. The
+     * queue is signalled only when {@code cancel} removed the entry, so the end is handled once.
      */
     private void abandon(AnnouncementTask task, Runnable onPlaybackComplete) {
         metrics.playbackFailed();
-        completionListener.cancel(task.inputId());
+        boolean removed = completionListener.cancel(task.inputId());
         try {
             deviceRegistryService.unregisterInput(task.inputId());
+        } catch (IllegalArgumentException alreadyRemoved) {
+            // The hub's only other IllegalArgumentException refuses a static input, which an
+            // announcement's tts-<uuid> input never is, so this always means "already removed".
+            log.debug("Ephemeral input {} was already removed", task.inputId());
         } catch (RuntimeException unregisterFailure) {
             log.warn("Failed to unregister ephemeral input {} after failed route creation",
                     task.inputId(), unregisterFailure);
         }
-        onPlaybackComplete.run();
+        if (removed) {
+            onPlaybackComplete.run();
+        } else {
+            log.debug("End of announcement {} was already handled", task.announcementId());
+        }
     }
 
     private PlaybackMode resolvePlaybackMode(String requested) {

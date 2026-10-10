@@ -17,7 +17,7 @@
     </parent>
 
     <artifactId>multiroom-tts</artifactId>
-    <version>0.1.5</version>
+    <version>0.1.6</version>
     <packaging>jar</packaging>
     <name>multiroom-tts</name>
     <description>Text-to-Speech announcement extension for the multiroom audio system</description>

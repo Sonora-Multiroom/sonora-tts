@@ -13,4 +13,3 @@ proposal stay in [../future/](../future/).
 
 | Priority | Item | Kind | Effort | Why this priority |
 |---|---|---|---|---|
-| P3 | [A route that fails to start is cleaned up twice](failed-start-double-cleanup.md) | Bug | Small | Since hub 0.1.22 a failed start logs `TTS_PLAYBACK_COMPLETED`, a WARN stack trace, and runs the completion callback twice. Harmless today, misleading in the logs |

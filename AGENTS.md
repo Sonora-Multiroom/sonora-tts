@@ -105,6 +105,7 @@ moves from `specs/` to `.specify/archive/`.
 | `004-gemini-tts-provider` | A `google-gemini` provider type through Google's Text-to-Speech endpoint with a service account (route A): model + voice + language, a style prompt per entry and per request, speaking rate honoured (pitch rejected), start-up faults, a default-provider cost warning, and Gemini voice listing from Google's list (with gender, also added for `google-cloud`) | 0.1.3 | [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) |
 | `005-tts-metrics` | `tts_*` metrics in the host's Micrometer registry (`/actuator/prometheus`): announcements by outcome, error code, queue reason and bounded provider; per-provider synthesis time (histogram up to the longest timeout), characters sent by part and tier, audio seconds; cache hits and occupancy; queue depth per target; playbacks. Billable usage measured once in `TtsService.synthesize`, before the provider call. An unreadable body now gets the contract's `INVALID_REQUEST` `ErrorResponse`. `docs/metrics.md` | 0.1.4 | [specs/005-tts-metrics/](specs/005-tts-metrics/) |
 | `006-announcement-ducking` | Announcements join their target in `duck-others` (default) or `mix` instead of stopping it and restoring it afterwards: `playbackMode` per request and `playback.default-mode`; the snapshot/restore machinery is gone; a host refusal (`RouteAdmissionException`) is logged as `TTS_PLAYBACK_REFUSED`, counted as a failed playback and not retried. Requires multiroom-api 0.1.21 | 0.1.5 | [specs/006-announcement-ducking/](specs/006-announcement-ducking/) |
+| `007-failed-start-cleanup` | An announcement that fails to start ends once, as `TTS_PLAYBACK_FAILED`, with one queue signal: the listener leaves a destroyed route that never went live (`startedAt == null`) to the failure path, `cancel` reports whether it removed the entry, and `abandon` signals the queue only then. No API bump (still 0.1.21) | 0.1.6 | [specs/007-failed-start-cleanup/](specs/007-failed-start-cleanup/) |
 
 Add a row when a feature merges, and change its path when it is archived.
 
@@ -178,8 +179,11 @@ unregisters it on the same `RouteDestroyedEvent` this module listens for. A seco
 nothing.
 **Prevention Rule:** Let `autoRemove` own the input. On completion, clean up only what is this
 module's: the cache pin, the resolver entry, any temp file.
-The one exception is a route the host refused (or that failed to start): no route exists, so
-nothing auto-removes the input, and `TtsService.activate` unregisters it then, and only then.
+The one exception is a route the host refused, or admitted and then failed to start: no route ever
+went live, so the hub's auto-remove never fires, and `TtsService.abandon` unregisters the input
+then, and only then. On hub 0.1.22+ a `RouteDestroyedEvent` with no `startedAt` arrives first;
+`PlaybackCompletionListener` leaves it tracked for that path, so the end is handled once. An
+"is not registered" answer from `unregisterInput` is tolerated at DEBUG.
 
 ### ⚠️ A Custom Input Scheme Must Resolve To One Core Already Plays
 **Issue:** A `tts://` URI reaches the pipeline and fails with `UnsupportedSchemeException`.
