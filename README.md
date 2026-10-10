@@ -38,8 +38,8 @@ ordinary dependency injection. It runs no web server of its own and ships no cop
 - `tts_*` metrics in the host's `/actuator/prometheus`: announcements, synthesis time and billable
   characters per provider, cache hits, queue depth and playbacks
 
-Status: **implemented, `mvn verify` green**, at version 0.1.5 with features 001 to 006. See the
-master [spec](.specify/memory/spec.md) for what it does today (005 and 006 are not merged into it
+Status: **implemented, `mvn verify` green**, at version 0.1.6 with features 001 to 007. See the
+master [spec](.specify/memory/spec.md) for what it does today (005 to 007 are not merged into it
 yet; their specs are under [specs/](specs/)), [plan](.specify/memory/plan.md) for
 how it is built, and [changelog](.specify/memory/changelog.md) for each feature and its open tasks
 (001's timings and Pi end-to-end run still need real audio hardware).
@@ -76,8 +76,8 @@ GET /actuator/extensions      →  tts, with the expected version, not REJECTED
 That check is the second half of the merge gate: a green local build proves the module compiles,
 not that it loads.
 
-**Deployment order.** Version 0.1.5 needs `multiroom-api` 0.1.21 (`Require-API-Version:
-[0.1.21,0.2.0)`): deploy a host built with it first, then this JAR. A level and fade for the
+**Deployment order.** Version 0.1.6 needs `multiroom-api` 0.1.21 (`Require-API-Version:
+[0.1.21,0.2.0)`) and runs unchanged on 0.1.22: deploy a host built with it first, then this JAR. A level and fade for the
 lowered music are the host's `audio.mixing.ducking.*` settings, not this extension's.
 
 ## Configuration
@@ -108,4 +108,5 @@ examples for every provider type, and how to trigger an announcement and manage 
 | [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) | Gemini TTS provider (`google-gemini`) |
 | [specs/005-tts-metrics/](specs/005-tts-metrics/) | TTS metrics |
 | [specs/006-announcement-ducking/](specs/006-announcement-ducking/) | Announcements that join the target (`duck-others`, `mix`); its REST contract (v0.1.5) is the current one |
+| [specs/007-failed-start-cleanup/](specs/007-failed-start-cleanup/) | A failed start ends once, as a failure |
 | [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |
