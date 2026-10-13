@@ -38,8 +38,8 @@ ordinary dependency injection. It runs no web server of its own and ships no cop
 - `tts_*` metrics in the host's `/actuator/prometheus`: announcements, synthesis time and billable
   characters per provider, cache hits, queue depth and playbacks
 
-Status: **implemented, `mvn verify` green**, at version 0.1.6 with features 001 to 007. See the
-master [spec](.specify/memory/spec.md) for what it does today (005 to 007 are not merged into it
+Status: **implemented, `mvn verify` green**, at version 0.1.7 with features 001 to 008. See the
+master [spec](.specify/memory/spec.md) for what it does today (005 to 008 are not merged into it
 yet; their specs are under [specs/](specs/)), [plan](.specify/memory/plan.md) for
 how it is built, and [changelog](.specify/memory/changelog.md) for each feature and its open tasks
 (001's timings and Pi end-to-end run still need real audio hardware).
@@ -76,7 +76,7 @@ GET /actuator/extensions      →  tts, with the expected version, not REJECTED
 That check is the second half of the merge gate: a green local build proves the module compiles,
 not that it loads.
 
-**Deployment order.** Version 0.1.6 needs `multiroom-api` 0.1.21 (`Require-API-Version:
+**Deployment order.** Version 0.1.7 needs `multiroom-api` 0.1.21 (`Require-API-Version:
 [0.1.21,0.2.0)`) and runs unchanged on 0.1.22: deploy a host built with it first, then this JAR. A level and fade for the
 lowered music are the host's `audio.mixing.ducking.*` settings, not this extension's.
 
