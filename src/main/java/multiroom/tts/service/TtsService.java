@@ -41,6 +41,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Orchestrates one announcement end to end: validate, resolve the target and provider, serve from
@@ -341,18 +342,33 @@ public class TtsService implements SmartLifecycle {
 
     private void validateTargetExists(TargetType targetType, String targetName) {
         if (targetType == TargetType.SINGLE_OUTPUT) {
-            if (deviceQueryService.getOutput(OutputId.of(targetName)).isEmpty()) {
+            OutputId outputId = parseTargetId(OutputId::of, targetName);
+            if (deviceQueryService.getOutput(outputId).isEmpty()) {
                 throw new TtsException(TtsErrorCode.TARGET_NOT_FOUND,
                         "No output or output group named '" + targetName + "' found");
             }
         } else {
-            OutputGroup group = deviceQueryService.getGroup(GroupId.of(targetName)).orElseThrow(
+            OutputGroup group = deviceQueryService.getGroup(parseTargetId(GroupId::of, targetName)).orElseThrow(
                     () -> new TtsException(TtsErrorCode.TARGET_NOT_FOUND,
                             "No output or output group named '" + targetName + "' found"));
             if (group.getOutputIds().isEmpty()) {
                 throw new TtsException(TtsErrorCode.TARGET_NOT_FOUND,
                         "Output group '" + targetName + "' has no outputs");
             }
+        }
+    }
+
+    /**
+     * A name that breaks the hub's ID rule cannot name any output or group, so it is answered as
+     * not found rather than escaping as an {@code IllegalArgumentException} (a 500). Only the ID
+     * construction is caught, so the same exception from anywhere else still surfaces as a bug.
+     */
+    private static <T> T parseTargetId(Function<String, T> parser, String targetName) {
+        try {
+            return parser.apply(targetName);
+        } catch (IllegalArgumentException e) {
+            throw new TtsException(TtsErrorCode.TARGET_NOT_FOUND,
+                    "No output or output group named '" + targetName + "' found (not a valid ID)");
         }
     }
 
