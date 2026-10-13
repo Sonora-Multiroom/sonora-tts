@@ -468,6 +468,8 @@ replaces it. Leading and trailing whitespace is stripped before it is sent or ca
 
 `targetType` is `SINGLE_OUTPUT` (target a single output by
 name) or `OUTPUT_GROUP` (target a group; every output in it plays in sync).
+`targetName` is the output's or group's ID (1–255 letters, digits, hyphens or underscores), not
+its display name; a name outside that rule answers `400 TARGET_NOT_FOUND`.
 
 Response (`202 Accepted`):
 

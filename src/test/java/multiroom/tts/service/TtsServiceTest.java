@@ -50,6 +50,8 @@ import multiroom.tts.provider.cloud.google.TestServiceAccountKeys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.stubbing.Answer;
@@ -279,6 +281,20 @@ class TtsServiceTest {
                 .isInstanceOf(TtsException.class)
                 .extracting(e -> ((TtsException) e).getErrorCode())
                 .isEqualTo(TtsErrorCode.TARGET_NOT_FOUND);
+    }
+
+    @ParameterizedTest
+    @EnumSource(TargetType.class)
+    void aNameThatIsNotAValidIdRaisesTargetNotFound(TargetType targetType) {
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        assertThatThrownBy(() -> service.speak(new AnnounceCommand("Hi", "living room",
+                targetType, null, null, null, null, null, null)))
+                .isInstanceOf(TtsException.class)
+                .hasMessageContaining("'living room'")
+                .extracting(e -> ((TtsException) e).getErrorCode())
+                .isEqualTo(TtsErrorCode.TARGET_NOT_FOUND);
+        verifyOnlyRejection("openai", "TARGET_NOT_FOUND", "none");
     }
 
     @Test

@@ -1,5 +1,6 @@
 package multiroom.tts.rest.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import multiroom.api.model.TargetType;
@@ -19,6 +20,8 @@ import multiroom.api.model.TargetType;
  */
 public record SpeakRequest(
         @NotBlank(message = "Text must not be blank") String text,
+        @Schema(description = "ID of the output or output group (not its display name): 1-255 letters,"
+                + " digits, hyphens or underscores. Any other name answers 400 TARGET_NOT_FOUND")
         @NotBlank(message = "targetName must not be blank") String targetName,
         @NotNull(message = "targetType is required") TargetType targetType,
         String providerName,
