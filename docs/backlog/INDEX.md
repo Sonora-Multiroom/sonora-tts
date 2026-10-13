@@ -1,8 +1,8 @@
 # Backlog index
 
-Every item in `docs/backlog/`, highest priority first. Each one is a proposal, not a requirement.
-When you add, ship or delete an item, update this list. Longer investigations that are not yet a
-proposal stay in [../future/](../future/).
+Every item in `docs/backlog/`, highest priority first. Each one is a proposal, not a requirement
+(see the Backlog section of [AGENTS.md](../../AGENTS.md)). When you add, ship or delete an item,
+update this list.
 
 | Priority | Meaning |
 |---|---|
