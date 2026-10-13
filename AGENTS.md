@@ -114,6 +114,26 @@ local to one feature's `spec.md` / `research.md`, so every feature reuses them (
 not 001's). State the rule or the reason itself in the comment. A feature number (`001`, `019`) or a
 constitution principle is unambiguous and may be named.
 
+## Backlog (`docs/backlog/`)
+
+The default place for proposed features, deferred work and ideas that are not yet a spec.
+
+- **When to use:** when the user describes a future feature or asks to note something "for the
+  backlog" or "for later", write it here as one Markdown file per item, not as a spec or a code
+  TODO. When a spec, plan or review defers work to a follow-up, record that work here and link it
+  from where it was deferred.
+- **Format:** follow the existing files. Start with a header block giving Status, Origin, Depends on
+  and Effort, followed by Problem, Proposal and Open questions sections. Link related items to each
+  other. Name the file in kebab-case after the change, not a number.
+- **Rules:** a backlog item is a proposal, not a requirement. Once its feature ships, delete the
+  item, or update it if part of the work remains. Work that belongs to another repository goes in
+  that repository's backlog — a hub change goes to `multiroom-ai`'s `docs/backlog/`.
+- **Becoming a spec:** items have no feature number. `/speckit-specify` assigns one when an item is
+  specified; the item then links to its `specs/NNN-*/` folder until the feature ships and the item
+  is deleted.
+- `docs/backlog/INDEX.md` lists every item with a priority (P1–P4); keep it in sync when you add,
+  ship or delete one.
+
 ## Known Issues & Gotchas
 
 ### ⚠️ Never Hold Key Material In A `@ConfigurationProperties` Bean
