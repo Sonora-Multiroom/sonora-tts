@@ -4,6 +4,39 @@
 
 Newest first.
 
+### 005 TTS Metrics — archived 2026-10-15
+
+**Branch:** `005-tts-metrics`
+**Spec:** [.specify/archive/005-tts-metrics/spec.md](../archive/005-tts-metrics/spec.md)
+**Release:** `multiroom-tts` 0.1.4, still requires `multiroom-api` 0.1.18 (no upstream change)
+
+**What was added:**
+
+- `tts_*` metrics in the host's Micrometer registry, on the host's existing `/actuator/prometheus`:
+  announcements by outcome, error code, rejection reason and (configured) provider; synthesis time
+  per provider as a histogram reaching the longest timeout; characters sent by part and billing
+  tier, and seconds of audio returned; cache hits and misses, size, entries and limit; queue depth
+  per target; playbacks started and failed
+- Billable usage defined and measured once, in `TtsService.synthesize` before the provider call,
+  with the billing tier — groundwork for a later monthly character budget
+- A queue rejection carries `queue_full` or `shutting_down` without changing the caller's
+  `PROVIDER_ERROR`
+- An unreadable speak body now answers the contract's `ErrorResponse` with `INVALID_REQUEST`
+- Bounded tags only; no metrics, and no failure, when the host has no Micrometer; none with
+  `multiroom.tts.enabled=false`
+- Operator guide `docs/metrics.md`, linked from the README and `docs/configuration.md`
+
+**New Components:**
+
+- `multiroom.tts.metrics`: `TtsMetrics`, `MicrometerTtsMetrics`, `NoopTtsMetrics`, `SynthesisUsage`
+- `QueueRejectedException`; `TtsProvider.type()` and `billingTier(settings)`;
+  `ProviderType.configName()`; `ProviderRegistry.isConfigured(name)`;
+  `AnnouncementQueueManager.depth(key)`
+- Dependencies: `micrometer-core` (`provided`), `micrometer-registry-prometheus` (`test`)
+
+**Tasks Completed:** 49/49 tasks — including T048 (local-core run) and T049 (production Pi check,
+performed by the user)
+
 ### 004 Gemini TTS Provider — 2026-09-26 (archived 2026-09-26)
 
 **Branch:** `004-gemini-tts-provider`

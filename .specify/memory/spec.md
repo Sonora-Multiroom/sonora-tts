@@ -1,5 +1,10 @@
 # Main Specification: Sonora TTS
 
+> **Revision**: 2026-10-15 — archived `.specify/archive/005-tts-metrics`: a metrics story set (with full
+> story blocks under "Story details"), a "Metrics" requirements group, metrics entities, edge cases
+> and success criteria, a new `## Assumptions` section (AS-001–AS-009), and 001/FR-032 annotated
+> for the unreadable-body answer. Earlier revisions are recorded at the end of this file.
+
 **Scope**: one extension for the multiroom audio system — text-to-speech announcements delivered to a
 room or a group of rooms.
 
@@ -24,6 +29,10 @@ restores whatever the room was doing before.
   publishes `RouteDestroyedEvent`; restoration hangs off that event
 - **Queue**: in memory only. Unplayed announcements are dropped on restart; they are time-sensitive
   and worthless afterwards
+- **Metrics** *(since 005)*: announcements, provider synthesis time and work, cache use and
+  occupancy, queue depth and playbacks, recorded into the host's metrics registry and scraped from
+  the host's existing `/actuator/prometheus`; no endpoint of its own
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Overview"]
 
 ## What it deliberately is not
 
@@ -61,6 +70,15 @@ endpoint or error code; its contract
 ([tts-rest-api.yaml](../archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml), v0.1.3)
 adds `stylePrompt` to the request and `gender` to listed voices, and supersedes 003's.
 
+**Metrics** in 0.1.4 by `005-tts-metrics` (archived here 2026-10-15): the extension records its own
+`tts_*` metrics into the host's Micrometer registry, and measures billable usage (characters sent,
+by billing tier) once, before every provider call, as groundwork for a later character budget. No
+new endpoint or field; one behaviour change: an unreadable speak body now gets the contract's
+`ErrorResponse` with `INVALID_REQUEST`. Its metrics contract is
+[.specify/archive/005-tts-metrics/contracts/metrics.md](../archive/005-tts-metrics/contracts/metrics.md)
+(v0.1.4); the operator guide is [docs/metrics.md](../../docs/metrics.md). The REST contract stays
+004's v0.1.3.
+
 Features in progress live under [specs/](../../specs/) until they are archived here.
 
 ## User stories
@@ -86,9 +104,146 @@ Features in progress live under [specs/](../../specs/) until they are archived h
 | Settings go only to the entry that honours them | P3 | `stylePrompt` to a non-Gemini entry, or `engine`/`pitch` to a Gemini one (request or listing filter), is a 400 naming the field and type; `speakingRate` is accepted by both Google types | 004 |
 | List the Gemini voices | P3 | A `google-gemini` entry lists every Gemini voice in Google's list with the entry's model and a gender, sorted by name; a language filter is form-checked but does not narrow; listing is never used to check an announcement. `google-cloud` listings are unchanged but gain gender | 004 |
 | Queue announcements | P4 | Requests for one busy target play in arrival order; queued ones are discarded at shutdown | 001 |
+| See announcement volume and failures | P1 | Accepted and rejected announcements counted, each rejection by its error code; an unconfigured provider name never becomes a tag; the `accepted` series exist at zero from start-up | 005 |
+| Compare provider latency and reliability | P1 | Per configured provider: synthesis time (miss only), failures by error code, characters sent and seconds of audio returned, so time per 1,000 characters and the real-time factor are comparable | 005 |
+| Watch the cache work | P2 | Hit and miss counts; cache bytes, entries and limit matching `GET /api/tts/cache/stats`, and emptied after a clear | 005 |
+| Spot backlog and playback failures | P3 | Queue depth per target, back to zero once drained; dequeued announcements counted as playback `started` or `failed` | 005 |
 
 Sources: [001](../archive/001-tts-extension/spec.md), [002](../archive/002-google-voice-selection/spec.md),
-[003](../archive/003-google-service-account-auth/spec.md), [004](../archive/004-gemini-tts-provider/spec.md).
+[003](../archive/003-google-service-account-auth/spec.md), [004](../archive/004-gemini-tts-provider/spec.md),
+[005](../archive/005-tts-metrics/spec.md).
+
+### Story details
+
+Stories archived before 005 keep their full blocks in the archived spec named in the Source column.
+The actor in every story below is the **operator**: the person who runs the host, configures the
+TTS providers and watches the system through Prometheus and Grafana.
+
+#### See announcement volume and failures (Priority: P1)
+
+[Source: .specify/archive/005-tts-metrics/spec.md -> User Story 1]
+
+An operator opens their dashboard and sees how many announcements the extension accepted and
+rejected over time, with each rejection broken down by its error code (`TARGET_NOT_FOUND`,
+`PROVIDER_TIMEOUT`, `INVALID_VOICE` and the rest). A spike in one code tells them where to look
+without reading logs.
+
+**Why this priority**: It is the one number that answers "is TTS working?". Every other metric
+explains a change in this one.
+
+**Independent Test**: Send one valid announcement and one to a target that does not exist, then
+read the host's metrics endpoint. One series shows one accepted announcement; another shows one
+rejection tagged `TARGET_NOT_FOUND`.
+
+**Acceptance Scenarios**:
+
+1. **Given** the extension is enabled, **When** a caller sends an announcement that is accepted,
+   **Then** the announcement count tagged `accepted` rises by one.
+2. **Given** the extension is enabled, **When** a caller sends an announcement that is rejected
+   with any error code, **Then** the announcement count tagged `rejected` and that error code
+   rises by one.
+3. **Given** a caller names a provider that is not configured, **When** the announcement is
+   rejected with `PROVIDER_NOT_FOUND`, **Then** the rejection is counted without the unknown name
+   appearing in any tag.
+4. **Given** the host has just started, **When** the operator reads the metrics endpoint before
+   any announcement, **Then** the announcement series are present with a count of zero for
+   `accepted`.
+
+#### Compare provider latency and reliability (Priority: P1)
+
+[Source: .specify/archive/005-tts-metrics/spec.md -> User Story 2]
+
+An operator sees, for each configured provider entry, how long synthesis takes and how often it
+fails, and which way it fails. They can tell that `google-gemini` takes four times as long as
+`google-cloud`, or that the local Piper engine has started timing out, and decide which provider
+should be the default.
+
+Raw synthesis time is not comparable on its own: a 300-character announcement takes longer than a
+20-character one on any provider. So the operator also sees how much work each synthesis was: the
+characters sent and the seconds of audio returned. From those they read time per 1,000 characters
+and the real-time factor (seconds spent per second of speech produced), which compare providers
+and spot a slowdown whatever the message mix. The character count is also what cloud providers
+bill by, so it doubles as a usage figure per provider.
+
+**Why this priority**: Providers are remote, billed and slow compared with everything else the
+extension does. Their latency is the latency an announcement has, and their failures are the
+failures an operator can act on (a quota, a key, a stopped local engine).
+
+**Independent Test**: Configure two providers, synthesize with each (cache misses), make one fail,
+and read the endpoint. Each provider has its own timing series with its type, and the failure is
+recorded against the failing provider with its error code. The character total of each provider
+equals the sum of the message lengths it synthesized.
+
+**Acceptance Scenarios**:
+
+1. **Given** a cache miss, **When** the provider synthesizes successfully, **Then** one timing is
+   recorded tagged with the provider's configured name, its type and outcome `success`.
+2. **Given** a cache miss, **When** the provider fails, **Then** one timing is recorded tagged with
+   the provider's name, its type and the error code the announcement was rejected with (for
+   example `PROVIDER_TIMEOUT`).
+3. **Given** a cache hit, **When** the announcement is served, **Then** no synthesis timing is
+   recorded.
+4. **Given** a cache miss, **When** the provider is asked to synthesize a message of N characters,
+   **Then** N is added to that provider's character total, whether the synthesis succeeds or
+   fails.
+5. **Given** a successful synthesis, **When** its audio lasts D seconds, **Then** D is added to
+   that provider's audio-duration total.
+6. **Given** two providers synthesizing messages of different lengths, **When** the operator
+   divides each provider's total synthesis time by its total characters, **Then** the result is
+   its time per character, comparable between the two.
+
+#### Watch the cache work (Priority: P2)
+
+[Source: .specify/archive/005-tts-metrics/spec.md -> User Story 3]
+
+An operator sees the share of announcements served from the cache, and how full the cache is in
+bytes and entries against its configured limit. A falling hit rate after a change to message
+templates, or a cache stuck at its limit, is visible at a glance.
+
+**Why this priority**: The cache is what keeps repeated announcements fast and free. Its hit rate
+is the main lever on provider cost, but the service still works without the metric.
+
+**Independent Test**: Send the same announcement twice, then read the endpoint. The miss count and
+the hit count each show one, and the size gauges match `GET /api/tts/cache/stats`.
+
+**Acceptance Scenarios**:
+
+1. **Given** an announcement whose audio is cached, **When** it is served, **Then** the cache
+   request count tagged `hit` rises by one.
+2. **Given** an announcement whose audio is not cached, **When** it is synthesized, **Then** the
+   cache request count tagged `miss` rises by one.
+3. **Given** any cache state, **When** the endpoint is read, **Then** the cache size in bytes, the
+   entry count and the configured limit match what `GET /api/tts/cache/stats` reports at the same
+   moment.
+4. **Given** an operator clears the cache through the REST API, **When** the endpoint is next
+   read, **Then** the size and entry gauges show the emptied cache.
+
+#### Spot backlog and playback failures (Priority: P3)
+
+[Source: .specify/archive/005-tts-metrics/spec.md -> User Story 4]
+
+An operator sees how many announcements are waiting behind each target, and how many accepted
+announcements failed to start playing. A queue that never drains, or routes that keep failing on
+one speaker, show up before a listener complains.
+
+**Why this priority**: Both are rare, and both happen after the caller has already been told
+"accepted", so no response code reveals them. They matter for diagnosis rather than for daily
+health.
+
+**Independent Test**: Send three announcements to one target in quick succession and read the
+queue depth for that target while the first plays; then make route creation fail and read the
+playback failure count.
+
+**Acceptance Scenarios**:
+
+1. **Given** announcements are waiting for a target, **When** the endpoint is read, **Then** that
+   target's queue depth equals the number of announcements waiting for it.
+2. **Given** a target's queue has drained, **When** the endpoint is read, **Then** its queue depth
+   is zero.
+3. **Given** a queued announcement is dequeued, **When** its playback starts, **Then** the playback
+   count tagged `started` rises by one.
+4. **Given** a queued announcement is dequeued, **When** its playback cannot start, **Then** the
+   playback count tagged `failed` rises by one.
 
 ## Requirements
 
@@ -120,7 +275,11 @@ the archived spec behind an ID for its full wording.
   caller-fixable faults (`INVALID_REQUEST`, `TARGET_NOT_FOUND`, `PROVIDER_NOT_FOUND`), 503 for
   provider-side ones (`PROVIDER_TIMEOUT`, `PROVIDER_RATE_LIMITED`, `PROVIDER_ERROR`,
   `FORMAT_NORMALIZATION_FAILED`). One mapping, exactly one status per code. 002 added
-  `INVALID_VOICE` (400) and `VOICE_CATALOGUE_UNAVAILABLE` (503) to the same mapping (002/FR-021)
+  `INVALID_VOICE` (400) and `VOICE_CATALOGUE_UNAVAILABLE` (503) to the same mapping (002/FR-021).
+  *Amended by 005*: a speak body that cannot be read (broken JSON, an unknown `targetType`) also
+  answers 400 with the contract's `ErrorResponse` and `INVALID_REQUEST`, never echoing the body,
+  instead of the framework's default error body
+  [Source: .specify/archive/005-tts-metrics/plan.md -> "an unreadable request body now gets the published `ErrorResponse(INVALID_REQUEST)`"]
 - **002/FR-009, FR-020** A request may also override `engine`, `pitch` and `speakingRate` — for
   `google-cloud` only. Sending any of them to another provider type is a 400 naming the field and
   the type, before any synthesis. *Amended by 004*: `speakingRate` is also accepted by
@@ -273,6 +432,129 @@ unedited (004/FR-024).
   contract cover the type, `stylePrompt` and Gemini listing; the Gemini planning note moved to
   `docs/archive/`
 
+### Metrics
+
+[Source: .specify/archive/005-tts-metrics/spec.md -> FR-001–FR-024] — this group only observes:
+announcements, providers, the cache, the queue and the REST contract behave as in 0.1.3, except for
+the unreadable-body answer noted under 001/FR-032.
+
+*Publication*
+
+- **005/FR-001** Metrics are published through the host's existing metrics collection, so they
+  appear in the host's Prometheus endpoint with no new endpoint and no operator configuration
+- **005/FR-002** A host that collects no metrics still starts the extension and serves
+  announcements unchanged; that is never a start-up failure
+- **005/FR-003** With `multiroom.tts.enabled=false` the extension contributes no metrics
+- **005/FR-004** Every metric is named under the `tts` prefix, so one query finds them all
+
+*Announcements*
+
+- **005/FR-005** Every speak request the extension answers is counted, `accepted` or `rejected` —
+  including requests rejected by the basic request checks before the announcement logic runs (a
+  blank text or target, a malformed body), which count as `rejected` with `INVALID_REQUEST`, so the
+  failure rate reflects every call a client made
+- **005/FR-006** A rejection carries the error code the caller receives, from the published set,
+  or the fixed `INTERNAL` when the caller received HTTP 500 with no code; an accepted announcement
+  carries the fixed `none`
+- **005/FR-006a** Every announcement count also carries `reason` from a fixed set: `queue_full`
+  when the target's queue had no room, `shutting_down` when the extension was stopping, `none`
+  otherwise — separating rejections that share `PROVIDER_ERROR` with a real provider failure,
+  without changing what the caller receives
+- **005/FR-007** The provider tag is the provider name only when it is a configured provider
+  (named explicitly or the default); otherwise the fixed placeholder `unknown`
+
+*Synthesis*
+
+- **005/FR-008** Every synthesis asked of a provider is timed, from the call until it returns audio
+  or fails, tagged with the provider's configured name, its type, `outcome` `success` or `failure`,
+  and `error` carrying the error code the announcement is rejected with (`none` on success)
+- **005/FR-008a** The timing also publishes a latency distribution as histogram buckets, so p95
+  and p99 per provider can be computed over any window and across restarts. The buckets reach at
+  least the longest configured provider timeout. Percentiles are never computed inside the
+  extension, since those cannot be combined across windows
+- **005/FR-009** A cache hit records no synthesis timing
+- **005/FR-010** Format conversion after synthesis is outside the timing
+- **005/FR-010a** Every synthesis records the characters sent to the provider, tagged with the
+  provider's name, type, billing tier, the timing's outcome and error, and the part: `text` (the
+  message) or `style_prompt` (sent only to `google-gemini`). Time per character uses `text`;
+  billable usage is the sum of both
+- **005/FR-010b** The billing tier is the voice family the provider bills by: for `google-cloud`
+  the engine family of the resolved voice (`Standard`, `Wavenet`, `Neural2`, `Studio`, `Chirp-HD`,
+  `Chirp3-HD`, or `other` for an unrecognized engine); for `google-gemini` the entry's configured
+  model; for every other type the fixed `none`. Always from the resolved settings or configuration,
+  never from caller free text
+- **005/FR-010c** Every successful synthesis records the seconds of audio produced, tagged with
+  the provider's name, type and billing tier (Gemini bills audio output), so the real-time factor
+  (synthesis time over audio duration) is computable. Derived from the audio already in memory,
+  with no extra disk or network work
+- **005/FR-010d** Character and audio-duration figures keep both a running total and a count, so
+  per-provider averages and ratios are computable over any window. The message length itself never
+  becomes a tag
+
+*Cache*
+
+- **005/FR-011** Every cache lookup made for an announcement is counted as `hit` or `miss`
+- **005/FR-012** The cache's current size in bytes, entry count and configured maximum in bytes are
+  published, consistent with `GET /api/tts/cache/stats`
+- **005/FR-013** Recording a cache hit adds no disk, network or subprocess work to the hit path
+
+*Queue and playback*
+
+- **005/FR-014** For each target that has received an announcement, the number of announcements
+  waiting in that target's queue is published
+- **005/FR-015** Queued announcements whose playback started, and those whose playback could not
+  start, are counted as `started` and `failed`
+
+*Cardinality and safety*
+
+- **005/FR-016** Tag values come only from bounded sets: configured provider names, provider
+  types, billing tiers (engine families, `other` and configured Gemini models), request parts
+  (`text`, `style_prompt`), published error codes and `INTERNAL`, rejection reasons, fixed words
+  (outcomes, `none`, `unknown`), and names of targets that passed validation. Message text, voices,
+  languages, style prompts, announcement ids and exception messages never appear in any tag
+- **005/FR-017** No metric reveals a key, token, key file content or request body
+- **005/FR-018** A failure while recording a metric never fails or delays an announcement
+
+*Documentation*
+
+- **005/FR-019** The operator guide `docs/metrics.md` ships with the feature and covers: where the
+  metrics are (the host's Prometheus endpoint, what the host must expose, and that
+  `multiroom.tts.enabled=false` removes them); every metric (Prometheus name, type, what one
+  increment or sample means, when it is recorded); every tag and its values, including the
+  `unknown` placeholder; ready-to-use queries for the failure rate by error code, timeout rate per
+  provider, average/maximum/p95/p99 synthesis time per provider (and p99 against the provider's
+  timeout, entered by the operator as a constant because a timeout is configuration, not a
+  metric), time per 1,000 characters, real-time factor, characters per provider per day, cache hit
+  ratio, cache fill against its limit and queue depth per target; and how to read them (counters
+  reset on restart or redeploy, time per character is a ratio over a window that favours long
+  messages, and what is deliberately left out: message text, voices, style prompts)
+- **005/FR-020** The README's documentation table and `docs/configuration.md` link to
+  `docs/metrics.md`
+
+*Groundwork for a character budget*
+
+- **005/FR-021** Characters sent to a provider are measured in exactly one place, shared by every
+  provider type, immediately before the provider is called, so a later budget check can read the
+  same figure at the same moment and refuse the call before it is made. The metric records that
+  figure once the call ends, with its outcome; a budget reads the measured figure, not the metric
+- **005/FR-022** A cache hit, and a request rejected before a provider is called (invalid text,
+  unknown target, unknown provider, settings the provider's resolver refuses), add no characters,
+  because neither is billed. A failure raised inside a provider call before anything reaches the
+  billed endpoint (a voice the catalogue does not list, a token that cannot be obtained) is counted
+  with `outcome="failure"` like any failed call, since the extension cannot tell it from a billed
+  failure. A full queue adds characters only when its request was a cache miss (synthesis runs
+  before queuing, so those characters were sent and billed); after a cache hit it adds none
+- **005/FR-023** `docs/metrics.md` defines billable usage in these terms and gives a query for
+  characters sent (successful and failed calls alike) per provider and billing tier in the current
+  calendar month, saying how far to trust it: Prometheus compensates for counter resets, so a
+  restart or redeploy loses only what was counted since the last scrape; the total is only as long
+  as Prometheus's retention; and the calendar month comes from the dashboard's time range, since a
+  query alone cannot express one
+- **005/FR-024** The local working note `docs/future/google-cloud-free-tier-tracking.md` (excluded
+  from git, so not part of the pull request) says what 005 provides (the definition, the
+  measurement point, the tier breakdown, the visibility) and what the budget feature still needs
+  (persisted monthly totals, a limit per entry, and the choice between rejecting and falling back)
+
 ### Playback
 
 - **001/FR-006, FR-007** Register an ephemeral input for the WAV and route it to the output, or to
@@ -351,6 +633,24 @@ unedited (004/FR-024).
   a `formatTag` reads as a miss. Pinned entries are never evicted
 - **Announcement task** — a ready-to-route announcement: its file, target and route snapshot. The
   per-target queue is bounded (default 10) and never persisted
+- **Announcement count** *(005)* — how many announcement requests arrived, by outcome, error code,
+  rejection reason and provider [Source: .specify/archive/005-tts-metrics/spec.md -> "Announcement count"]
+- **Synthesis timing** *(005)* — the duration and number of provider syntheses, with a bucketed
+  latency distribution, by provider name, provider type, outcome and error code
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Synthesis timing"]
+- **Synthesis work** *(005)* — the characters sent to each provider (by outcome) and the seconds of
+  audio it returned (successes only), as totals and counts: the denominators for normalised
+  latency. Built per synthesis as one value before the provider call, which a future budget check
+  reads too [Source: .specify/archive/005-tts-metrics/spec.md -> "Synthesis work"]
+  [Source: .specify/archive/005-tts-metrics/data-model.md -> "SynthesisUsage"]
+- **Cache request count** *(005)* — how many cache lookups hit or missed
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Cache request count"]
+- **Cache occupancy** *(005)* — the cache's current bytes and entries, and its configured byte
+  limit [Source: .specify/archive/005-tts-metrics/spec.md -> "Cache occupancy"]
+- **Queue depth** *(005)* — the number of announcements waiting, per target
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Queue depth"]
+- **Playback count** *(005)* — how many dequeued announcements started playing or failed to
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Playback count"]
 
 ## Request lifecycle
 
@@ -374,6 +674,11 @@ RECEIVED → VALIDATED            (or REJECTED → 400)
   → COMPLETED
 ```
 
+Since 005 the flow is unchanged but observed: every answered request is counted, the cache lookup
+is counted hit or miss, a synthesis is timed and its characters measured once immediately before
+the provider call (conversion outside the timing), and the playback start is counted `started` or
+`failed` [Source: .specify/archive/005-tts-metrics/spec.md -> FR-005, FR-011, FR-021, FR-015].
+
 ## Edge cases
 
 [Source: .specify/archive/001-tts-extension]
@@ -382,7 +687,9 @@ RECEIVED → VALIDATED            (or REJECTED → 400)
 - Concurrent requests for one target: both synthesized as they arrive, played in arrival order, no
   deduplication
 - Cache disk full: plays anyway, caching skipped for that request
-- Disabled extension: no beans for the whole run; "disabled mid-playback" cannot happen
+- Disabled extension: no beans for the whole run — and so no metrics at all, not even zero-valued
+  series; "disabled mid-playback" cannot happen
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "`multiroom.tts.enabled=false`"]
 - *(002)* A full voice name beats the default engine; a request engine that contradicts a full
   voice name is a 400 naming both
 - *(002)* A short voice with no language anywhere: a start-up fault in configuration, a 400 in a
@@ -417,6 +724,39 @@ RECEIVED → VALIDATED            (or REJECTED → 400)
 - *(004)* A whitespace-only request prompt is "no prompt"; a YAML block's trailing line break is
   stripped, so it shares a cache entry with the same prompt written plainly
 - *(004)* A `google-gemini` default provider is allowed, with the start-up billing warning
+- *(005)* The host collects no metrics (no metrics support on its classpath, or none configured):
+  the extension starts and serves announcements exactly as before, and records nothing
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "The host collects no metrics"]
+- *(005)* A caller-supplied value that is not configured (an unknown provider name, a free-text
+  voice, a style prompt, the message text) never becomes a tag value; only configured provider
+  names, provider types, validated target names, error codes and fixed outcome words are used
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "A caller-supplied value that is not configured"]
+- *(005)* A target removed from the host after announcements were sent to it: its queue-depth
+  series may remain at zero until restart; it does not grow without bound, because only validated
+  targets get a series
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "A target that is removed from the host"]
+- *(005)* A synthesis failing with an unexpected exception is recorded with the code the
+  announcement is rejected with (`PROVIDER_ERROR`), never an exception class name
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "A synthesis that fails with an unexpected exception"]
+- *(005)* A synthesis that succeeds but whose audio cannot be converted: the synthesis and its
+  characters are recorded as `success` (they were sent and billed; conversion is outside the
+  timing), no audio duration is recorded, and the announcement counts as `rejected` with
+  `FORMAT_NORMALIZATION_FAILED`
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "A synthesis that succeeds but whose audio cannot be converted"]
+- *(005)* A cache write failure that spills the audio to a temporary file still counts as a `miss`,
+  and the announcement as `accepted`
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "A cache write failure that spills the audio"]
+- *(005)* A full queue counts as `rejected` with the code the caller receives (currently
+  `PROVIDER_ERROR`) and reason `queue_full`, so an alert on provider errors can exclude it; a
+  rejection while the extension shuts down gets reason `shutting_down`
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "A full queue"]
+- *(005)* After a redeploy or host restart counts start again from zero; the monitoring system
+  handles counter resets [Source: .specify/archive/005-tts-metrics/spec.md -> "The extension is redeployed or the host restarts"]
+- *(005)* A malformed or incomplete request body counts as `rejected` with `INVALID_REQUEST` and
+  provider `unknown`, though it never reached the announcement logic
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "A malformed or incomplete request body"]
+- *(005)* Reading the metrics endpoint does not synthesize, touch the disk or contact a provider
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Reading the metrics endpoint"]
 
 ## Success criteria
 
@@ -460,6 +800,55 @@ repository boots the host.
 | 004/SC-008 no secrets | none in logs or errors | Tested by captured output; core log searched in T053 |
 | 004/SC-009 no library | no new third-party dependency | No dependency added |
 | 004/SC-010 Gemini listing | every published Gemini voice (30 on 2026-09-26) with gender | Tested against a fixture of the live shape |
+| 005/SC-001 failures explained | "how many failed in the last hour, and why" in one query, no logs | Query in `docs/metrics.md`; local-core run (T048) |
+| 005/SC-002 provider figures | average, max, p95, p99, failures, time per 1,000 characters, real-time factor — each in one query | Queries in `docs/metrics.md`; local-core run (T048) |
+| 005/SC-002a normalised latency | twice the characters leaves time per 1,000 characters roughly unchanged while the raw average grows | By construction (ratio of totals) |
+| 005/SC-003 cache figures | hit ratio computable; size matches `GET /api/tts/cache/stats` exactly with no announcement in between | Gauges read `AudioCache.stats()`; unit-tested |
+| 005/SC-004 hit cost | no measurably slower than 0.1.3: within 5 % on the median over 1,000 hits | Measured by hand in the local-core run (T048), not a test |
+| 005/SC-005 bounded series | 10,000 announcements with random text, voices and unknown providers → same series count as 10 | Cardinality test (T041) |
+| 005/SC-006 no metrics / disabled | a host without metrics support serves announcements; `enabled=false` contributes nothing | `TtsAutoConfigurationMetricsTest`; local-core run (T048) |
+| 005/SC-007 guide suffices | an operator writes the "share timed out per provider" query from `docs/metrics.md` alone; every query returns data once its event has happened | Local-core run with a forced timeout and full queue (T048) |
+
+Sources for the 005 rows: [.specify/archive/005-tts-metrics/spec.md -> SC-001–SC-007], status from
+[.specify/archive/005-tts-metrics/tasks.md -> T041, T047, T048].
+
+## Assumptions
+
+- **AS-001** The host's metrics collection is available to extensions on the shared classpath
+  (confirmed in `multiroom-core`: it ships the metrics library and the Prometheus registry and
+  exposes the `prometheus` endpoint). The extension uses it at `provided` scope, bundles nothing,
+  and needs no change to `multiroom-api`
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "The host's metrics collection is available"]
+- **AS-002** The starter's dependency ban covers only `multiroom-core`, so depending on the host's
+  metrics library passes the build gates. Documenting it upstream as part of the extension
+  contract is worthwhile but out of scope
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "The starter's dependency ban covers only"]
+- **AS-003** Target names come from the host's configured outputs and groups, and a series is
+  created only after a target passes validation, so the number of queue-depth series is bounded by
+  the host's device count
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Target names come from the host's configured outputs"]
+- **AS-004** The playback count exists because a failure to start playback happens after the
+  caller is told `accepted` and is otherwise visible only in logs
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "The playback count (User Story 4)"]
+- **AS-005** Work is measured in characters, not words: characters are what OpenAI and Google bill
+  by, need no language-aware splitting, and are exact. Gemini is the exception: it bills input
+  tokens plus audio output tokens, so for it characters are only a rough proxy and seconds of audio
+  are closer to the bill; both are recorded, and choosing the budget's unit for Gemini is left to
+  that feature. The style prompt is counted separately because it is sent as input and may be
+  billed (not yet confirmed), but it does not lengthen synthesis in proportion. Synthesis time has
+  a fixed part (connection, authentication, model start), so time per character is a ratio of
+  totals over a window, not a per-request constant; short messages look proportionally slower
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Work is measured in characters, not words"]
+- **AS-006** Playback that starts and later ends normally is not timed: its length is the audio's,
+  which says nothing about health
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Playback that starts and later ends normally"]
+- **AS-007** Cache evictions, provider token refreshes and voice-catalogue fetches are not measured;
+  they can follow if the first metrics show a need
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "Cache evictions, provider token refreshes"]
+- **AS-008** The version becomes 0.1.4
+  [Source: .specify/archive/005-tts-metrics/spec.md -> "The version becomes 0.1.4"]
+- **AS-009** Dashboards and alert rules are out of scope; the documentation gives example queries
+  only [Source: .specify/archive/005-tts-metrics/spec.md -> "Dashboards and alert rules are out of scope"]
 
 ## Host coupling
 

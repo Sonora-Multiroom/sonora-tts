@@ -1,11 +1,19 @@
 # Main Implementation Plan: Sonora TTS
 
+> **Revision**: 2026-10-15 — archived `.specify/archive/005-tts-metrics`: the `metrics/` package,
+> `QueueRejectedException` and the SPI/registry/queue additions in the tree; Micrometer
+> (`provided`) and the Prometheus registry (`test`) as dependencies; the metrics surface on the
+> host's `/actuator/prometheus` and the unreadable-body answer; metrics design decisions and
+> testing notes; T048 recorded and T049 recorded as user-performed. Earlier revisions are recorded
+> at the end of this file.
+
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
 [Source: .specify/archive/001-tts-extension/plan.md], `002-google-voice-selection`
 [Source: .specify/archive/002-google-voice-selection/plan.md],
 `003-google-service-account-auth` [Source: .specify/archive/003-google-service-account-auth/plan.md]
-and `004-gemini-tts-provider` [Source: .specify/archive/004-gemini-tts-provider/plan.md].
+`004-gemini-tts-provider` [Source: .specify/archive/004-gemini-tts-provider/plan.md] and
+`005-tts-metrics` [Source: .specify/archive/005-tts-metrics/plan.md].
 
 ## Shape
 
@@ -22,9 +30,16 @@ src/main/java/multiroom/tts/
 ├── TtsErrorCode, TtsException # services throw codes; nothing below rest/ knows an HTTP status
 ├── config/                    # TtsProperties @ConfigurationProperties("multiroom.tts") + nested
 │                              #   cache/queue/provider config; ALL defaults and start-up
-│                              #   validation live here
-├── provider/                  # TtsProvider SPI (resolveSettings + synthesize), ProviderRegistry
-│   │                          #   (first = implicit default), VoiceCatalogueProvider (optional
+│                              #   validation live here; ProviderType.configName() (005: the
+│                              #   configuration spelling, also the `type` metric tag)
+├── metrics/                   # 005: TtsMetrics (the event seam), MicrometerTtsMetrics (the ONLY
+│                              #   class importing io.micrometer: meters, tag rules, buckets, cache
+│                              #   and queue gauges), NoopTtsMetrics, SynthesisUsage (the work one
+│                              #   synthesis asks, built before the provider call)
+├── provider/                  # TtsProvider SPI (resolveSettings + synthesize; since 005 type()
+│   │                          #   and a pure default billingTier(settings) = "none"),
+│   │                          #   ProviderRegistry (first = implicit default; isConfigured(name)
+│   │                          #   since 005), VoiceCatalogueProvider (optional
 │   │                          #   listing capability), Requested/SynthesisSettings,
 │   │                          #   DefaultSettingsResolution (001 rules for non-Google providers)
 │   ├── cloud/                 #   OpenAiTtsProvider, GoogleCloudTtsProvider (orchestrator only),
@@ -45,7 +60,9 @@ src/main/java/multiroom/tts/
 │                              #   AudioFormatMapper, WavFileWriter,
 │                              #   TtsInputResolver (tts://<uuid> → file://…/<sha256>.wav)
 ├── cache/                     # AudioCache / FilesystemAudioCache: index.json + <sha256>.wav, LRU, pins
-├── queue/                     # AnnouncementQueueManager: per-target queue + worker, SmartLifecycle
+├── queue/                     # AnnouncementQueueManager: per-target queue + worker, SmartLifecycle;
+│                              #   depth(key) and QueueRejectedException (QUEUE_FULL|SHUTTING_DOWN,
+│                              #   still PROVIDER_ERROR to the caller) since 005
 ├── service/                   # TtsService (validate → resolve → cache → synthesize → convert →
 │                              #   enqueue), PlaybackCompletionListener (@EventListener
 │                              #   RouteDestroyedEvent), VoiceQueryService (voice listing)
@@ -53,7 +70,8 @@ src/main/java/multiroom/tts/
     ├── api/                   # TtsApi, TtsCacheApi, TtsVoiceApi: mappings + OpenAPI annotations
     ├── controller/            # TtsController, TtsCacheController, TtsVoiceController (implement them)
     ├── dto/                   # SpeakRequest, SpeakAcceptedResponse, VoiceListResponse, ErrorResponse
-    └── advice/                # TtsExceptionHandler, scoped to the api/ interfaces
+    └── advice/                # TtsExceptionHandler, scoped to the api/ interfaces; records
+                               #   pre-service rejections and answers an unreadable body (005)
 src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
 ```
 
@@ -75,13 +93,16 @@ The manifest, written by the inherited parent POM, carries `Extension-Id: tts`,
 | `spring-boot-starter-web`, `-validation`, Jackson | `provided` | Supplied by the host at runtime; bundling risks a class collision with another extension |
 | `spring-boot-configuration-processor` | `provided`, optional | Configuration metadata for `multiroom.tts.*` |
 | `swagger-annotations-jakarta` 2.2.47 | `provided` | `@Operation` / `@ApiResponse` for springdoc; pinned to the copy `multiroom-rest` ships, never bundled |
+| `micrometer-core` 1.15.12 | `provided`, no version (managed by `spring-boot-dependencies` 3.5.15) | Since 005: the host's metrics registry; host-supplied on the shared classpath, never bundled (constitution 1.0.2, VIII) [Source: .specify/archive/005-tts-metrics/plan.md -> "Primary Dependencies"] |
+| `micrometer-registry-prometheus` 1.15.12 | `test` | Since 005: asserts the scraped Prometheus names and tag-key sets [Source: .specify/archive/005-tts-metrics/plan.md -> "Primary Dependencies"] |
 | `javax.sound.sampled` (JDK) | — | WAV parsing, which is why there is **no** `multiroom-decoder` dependency |
 | `java.net.http.HttpClient` (JDK) | — | Cloud provider calls, no vendor SDK |
 | JUnit 5, Mockito, Spring Boot Test | `test` | |
 | WireMock (`wiremock-standalone` 3.9.2) | `test` | Cloud provider HTTP; no test calls a real provider |
 | `jacoco-maven-plugin` 0.8.14 | build | Constitution III's 80 % line-coverage floor, enforced by `mvn verify` since 002. 0.8.14 because 0.8.11 cannot read Java 25 class files |
 
-002, 003 and 004 added no dependency. Service-account sign-in uses the JDK's `java.security`
+002, 003 and 004 added no dependency; 005 added only Micrometer, which the host already supplies
+(no `multiroom-api` change, `multiroom.require_api_version` stays 0.1.18). Service-account sign-in uses the JDK's `java.security`
 (`KeyFactory`, `Signature`) — `google-auth-library` was rejected because shading it would bring
 Guava and its own HTTP transport onto the shared classpath.
 
@@ -135,6 +156,11 @@ Piper's `model-path` and its `.onnx.json` sidecar must exist; `python-executable
 `PATH`-resolved command and is not checked. Operator reference:
 [docs/configuration.md](../../docs/configuration.md).
 
+005 adds no `multiroom.tts.*` key. The metrics follow `multiroom.tts.enabled` (off: no meters), and
+the host-side Spring Boot filter `management.metrics.enable.tts=false` drops them all with no code
+here; synthesis histogram buckets are derived from the longest configured `timeout-seconds`
+[Source: .specify/archive/005-tts-metrics/research.md -> R3, R12].
+
 ## HTTP surface
 
 `/api/tts/**` on the host's single port, owned by this module and documented by the host's springdoc
@@ -159,6 +185,36 @@ the JAR:
 [.specify/archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml](../archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml)
 (v0.1.3 — adds `stylePrompt` and `gender`; supersedes 003's v0.1.2, which was 002's v0.1.1 plus a
 changelog entry; 002's superseded 001's).
+
+005 added no endpoint and no field. An unreadable `POST /api/tts/speak` body
+(`HttpMessageNotReadableException`) now answers 400 `ErrorResponse(INVALID_REQUEST, "Request body
+could not be read")`, which brings the implementation in line with v0.1.3; a 405 or 415 that Spring
+refuses before any advice is chosen is not answered by this module
+[Source: .specify/archive/005-tts-metrics/research.md -> R6].
+
+### Metrics
+
+[Source: .specify/archive/005-tts-metrics/research.md -> R3, R7] — published through the host's Micrometer
+registry on the host's existing `GET /actuator/prometheus`; no endpoint of this module's own.
+
+| Micrometer name | Type | Prometheus series | Tags |
+|---|---|---|---|
+| `tts.announcements` | Counter | `tts_announcements_total` | `provider`, `outcome` (`accepted`/`rejected`), `error`, `reason` |
+| `tts.synthesis` | Timer, fixed histogram buckets | `tts_synthesis_seconds_{count,sum,max,bucket}` | `provider`, `type`, `outcome` (`success`/`failure`), `error` |
+| `tts.synthesis.characters` | DistributionSummary | `tts_synthesis_characters_{count,sum,max}` | `provider`, `type`, `tier`, `outcome`, `error`, `part` (`text`/`style_prompt`) |
+| `tts.synthesis.audio` | DistributionSummary (seconds) | `tts_synthesis_audio_seconds_{count,sum,max}` | `provider`, `type`, `tier` |
+| `tts.cache.requests` | Counter | `tts_cache_requests_total` | `outcome` (`hit`/`miss`) |
+| `tts.cache.size`, `tts.cache.max`, `tts.cache.entries` | Gauges | `tts_cache_size_bytes`, `tts_cache_max_bytes`, `tts_cache_entries` | — |
+| `tts.queue.depth` | Gauge per target | `tts_queue_depth` | `target`, `target_type` (`output`/`group`) |
+| `tts.playbacks` | Counter | `tts_playbacks_total` | `outcome` (`started`/`failed`) |
+
+Tag values: `provider` is a configured name or `unknown`; `type` the configuration spelling
+(`openai`, `google-cloud`, `google-gemini`, `piper`, `local-http`); `error` a `TtsErrorCode` name,
+`INTERNAL` (HTTP 500 with no code) or `none`; `reason` `queue_full`, `shutting_down` or `none`;
+`tier` a `GoogleEngine` canonical name or `other` (`google-cloud`), the configured model
+(`google-gemini`), or `none`. Contract (v0.1.4):
+[.specify/archive/005-tts-metrics/contracts/metrics.md](../archive/005-tts-metrics/contracts/metrics.md);
+operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
 
 ## Architecture decisions
 
@@ -288,6 +344,61 @@ changelog entry; 002's superseded 001's).
 - **The cost warning lives in `TtsProperties.validate()`**, reproducing `ProviderRegistry`'s
   default rule, because validation runs once, before the registry exists
 
+[Source: .specify/archive/005-tts-metrics/plan.md, research.md]
+
+- **The host's Micrometer, injected** (R1): `micrometer-core` at `provided` scope, no version of
+  its own. A metrics facade in `multiroom-api` (an upstream change for something the host already
+  provides) and `Metrics.globalRegistry` (hidden dependency, shared global state in tests) were
+  rejected
+- **One seam, two implementations** (R2): callers report events through `TtsMetrics`, never a
+  Micrometer type, so their tests stay plain Mockito. `TtsAutoConfiguration` holds two nested
+  configurations: `@ConditionalOnClass(name = "io.micrometer.core.instrument.MeterRegistry")` builds
+  `MicrometerTtsMetrics` from `ObjectProvider<MeterRegistry>.getIfAvailable()`, else the no-op;
+  `@ConditionalOnMissingClass` of the same name builds `NoopTtsMetrics`. The class is named by
+  string so the auto-configuration loads without Micrometer. `ObjectProvider` resolves at bean
+  creation, after every definition is registered, so there is no ordering race and no `after =`
+  reference to an actuator class. Neither branch can fail start-up; `enabled=false` skips the
+  whole auto-configuration and so every meter. Injecting `MeterRegistry` directly, `MeterBinder`
+  for everything, and a `SimpleMeterRegistry` fallback were rejected
+- **One tag-key set per metric name** (R4): `PrometheusMeterRegistry` silently drops a meter whose
+  tag keys differ from the first of its name, so a value that does not apply is a fixed word
+  (`none`), never a missing tag
+- **Where each event is recorded** (R5): accepted, and rejected by the announcement logic, in
+  `TtsService.speak` around its whole body (a `finally`-style wrapper, not at each `throw`, which
+  also covers `INTERNAL`); rejected by the basic request checks in `TtsExceptionHandler`
+  (bean-validation, only when the failing controller is `TtsController`, and the new
+  unreadable-body handler); synthesis time, characters and audio in `TtsService.synthesize` and
+  the line after conversion; hit or miss at the `audioCache.get` branch; cache gauges on
+  `AudioCache.stats()`, which walks the in-memory index under its lock
+- **Bounded tags** (R7): the provider tag is used only when `ProviderRegistry.isConfigured` says
+  so; an unrecognized Google engine maps to tier `other`, so a free-text voice cannot mint a tier;
+  a Gemini model is configuration, bounded by the entries. A provider actually named `unknown`
+  collides harmlessly with the placeholder
+- **Queue rejections carry a reason** (R8): `QueueRejectedException extends TtsException`, always
+  `PROVIDER_ERROR` with the existing messages, so the handler maps it unchanged
+- **Queue depth** (R9): `depth(key)` counts waiting tasks, excluding the one playing; after a
+  successful enqueue `TtsService` calls `trackQueue`, and `MicrometerTtsMetrics` registers one
+  gauge per target key, reading the live queue at scrape time. Queues are never removed from the
+  manager's map, so the gauge's reference stays valid
+- **Playback started/failed** (R10): started right after `routeService.createRoute` returns;
+  failed in `activate`'s catch, plus a wrapper around the activator handed to the queue for a
+  `registerInput` or `track` failure before that `try`. The inner catch does not rethrow, so
+  nothing is counted twice
+- **Usage measured once, before the call** (R11): `TtsService.synthesize` builds `SynthesisUsage`
+  (provider name, `type()`, `billingTier(settings)`, text and style-prompt characters as Unicode
+  code points) immediately before `provider.synthesize`, then starts a `Timer.Sample`; outcome and
+  error are set when it returns or fails, and a 0-length `style_prompt` part is not recorded. Audio
+  seconds are `pcm.length / (sampleRate × channels × bytesPerSample)` of the native format, after
+  conversion, which stays outside the timer. A mocked provider returning `null` from `type()`
+  publishes `unknown`
+- **Fixed histogram buckets** (R12): 0.1, 0.25, 0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 45, 60, 90,
+  120 s, cut after the first value at or above the longest configured `timeout-seconds`, which is
+  added if not already a bucket — at most 17 buckets per series instead of Micrometer's ~70
+- **Recording never breaks an announcement** (R13): every public `MicrometerTtsMetrics` method
+  catches `RuntimeException`, logs `WARN` once per metric (then `DEBUG`) and returns. Micrometer
+  does no I/O on record; the scrape runs on the actuator's thread. A cache hit costs one in-memory
+  increment
+
 ## Testing strategy
 
 Unit and slice tests only; nothing boots the host.
@@ -312,6 +423,17 @@ Unit and slice tests only; nothing boots the host.
   mixing full names and bare Gemini names in the live 2026-09-26 shape); a 24 kHz WAV fixture must
   reach `FormatConverter` as a 24 kHz source; `CacheKeyTest` pins pre-004 hashes; a captured-log
   test covers Gemini secrets; the value types and resolver are tested without HTTP
+- Metrics (005) [Source: .specify/archive/005-tts-metrics/research.md -> R16]: `MicrometerTtsMetricsTest`
+  over a `SimpleMeterRegistry` (exact tags per event, gauges following a stubbed cache and queue
+  supplier, a throwing registry does not propagate); `PrometheusNamesTest` over a
+  `PrometheusMeterRegistry` records every tag combination, scrapes, and asserts every contract
+  series name, no combination dropped for a mismatched key set, and the bucket bounds;
+  `TtsAutoConfigurationMetricsTest` (`ApplicationContextRunner`: registry → Micrometer, none →
+  no-op, `FilteredClassLoader(MeterRegistry.class)` → starts with the no-op, `enabled=false` → no
+  `TtsMetrics`); `TtsServiceTest` with a mocked `TtsMetrics` for every event, plus a cardinality
+  loop of 10,000 random texts, voices and unknown providers whose meter count must not grow and
+  whose tags carry no secret; handler/controller tests for the unreadable body. The cache-hit cost
+  is measured by hand against a live host, never asserted as a timing
 - JaCoCo's 80 % floor fails `mvn verify`
 
 ## Build, deploy, verify
@@ -340,7 +462,10 @@ core proves the JAR loads.
    not exist. **Open at archival**: 001's tasks T028a, T032a, T041a and T058 — the timings and the
    Pi end-to-end run — are unchecked. 004's live runs, by contrast, are done: T053 (the local-core
    smoke run with a real key) and T054 (the production Pi check of the 24 kHz Gemini path and the
-   unedited classic entry)
+   unedited classic entry). 005's are marked done in its tasks: T048 (local-core run with a forced
+   timeout and full queue, both switches, and the cache-hit median within 5 % of 0.1.3) and T049
+   (the production Pi check, performed by the user)
+   [Source: .specify/archive/005-tts-metrics/tasks.md -> T048, T049]
 
 ---
 
