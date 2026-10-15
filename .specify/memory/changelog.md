@@ -4,6 +4,42 @@
 
 Newest first.
 
+### 006 Announcements Over What Is Playing (Ducking) — archived 2026-10-15
+**Branch:** `006-announcement-ducking`
+**Spec:** [.specify/archive/006-announcement-ducking/spec.md](../archive/006-announcement-ducking/spec.md)
+**Release:** `multiroom-tts` 0.1.5, requires `multiroom-api` 0.1.21 (multiroom-ai 023; host first)
+
+**What was added:**
+
+- An announcement joins its target beside whatever plays there instead of stopping the target's
+  routes and recreating them afterwards: in `duck-others` (default; the host lowers the rest and
+  restores it) or `mix` (equal level). Accepting it into the queue changes nothing audible
+- The playback mode per request (`playbackMode`) and by configuration
+  (`multiroom.tts.playback.default-mode`); only `duck-others` and `mix`, case-insensitive; anything
+  else is 400 `INVALID_REQUEST` before any synthesis, or a start-up fault. Not part of the cache key
+- A route the host refuses (route limit) releases everything the announcement reserved, unregisters
+  its input, is logged `TTS_PLAYBACK_REFUSED` at WARN with the host's reason and output, counts as a
+  failed playback and is not retried; the queue moves on
+- Group announcements stay one route; queues stay per target, so overlapping targets may play at
+  once, the newer on top
+- README, `docs/configuration.md`, `docs/metrics.md` and REST contract v0.1.5 updated
+
+**New Components:**
+
+- `PlaybackMode` and `PlaybackProperties` in `multiroom.tts.config`; `playbackMode` on
+  `SpeakRequest`, `AnnounceCommand` and `AnnouncementTask` (which lost its route snapshot)
+- Removed: `TtsService.snapshotAndStopExistingRoutes`, `PlaybackCompletionListener.restoreRoutes` and
+  the listener's `RouteService` dependency
+- Starter parent and `multiroom.require_api_version` raised to 0.1.21
+
+**Superseded:**
+
+- RETIRED: 001/SC-006 (from .specify/archive/001-tts-extension/spec.md) → replaced by 006/SC-002. Reason: the route restore it timed no longer exists (006/FR-002); the host's ducking release, measured by 006/SC-002, took its place
+- RETIRED: entity "Announcement task" — 001's definition (from .specify/archive/001-tts-extension/data-model.md; directory-level ref only) → replaced by 006's definition of "Announcement task". Reason: the task carries the playback mode instead of a route snapshot; the bounded-queue sentence was kept
+
+**Tasks Completed:** 36/36 tasks — including T035 (local-core smoke run against the 023 host) and
+T036 (production verification, results recorded in the pull request)
+
 ### 005 TTS Metrics — archived 2026-10-15
 
 **Branch:** `005-tts-metrics`

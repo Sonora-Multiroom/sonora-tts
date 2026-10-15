@@ -104,7 +104,7 @@ moves from `specs/` to `.specify/archive/`.
 | `003-google-service-account-auth` | `service-account-key-file` as the alternative to `api-key` for `google-cloud`: a JDK-only JWT exchange for per-entry bearer tokens, validated once at start-up, no new error code | 0.1.2 | [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) |
 | `004-gemini-tts-provider` | A `google-gemini` provider type through Google's Text-to-Speech endpoint with a service account (route A): model + voice + language, a style prompt per entry and per request, speaking rate honoured (pitch rejected), start-up faults, a default-provider cost warning, and Gemini voice listing from Google's list (with gender, also added for `google-cloud`) | 0.1.3 | [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) |
 | `005-tts-metrics` | `tts_*` metrics in the host's Micrometer registry (`/actuator/prometheus`): announcements by outcome, error code, queue reason and bounded provider; per-provider synthesis time (histogram up to the longest timeout), characters sent by part and tier, audio seconds; cache hits and occupancy; queue depth per target; playbacks. Billable usage measured once in `TtsService.synthesize`, before the provider call. An unreadable body now gets the contract's `INVALID_REQUEST` `ErrorResponse`. `docs/metrics.md` | 0.1.4 | [.specify/archive/005-tts-metrics/](.specify/archive/005-tts-metrics/) |
-| `006-announcement-ducking` | Announcements join their target in `duck-others` (default) or `mix` instead of stopping it and restoring it afterwards: `playbackMode` per request and `playback.default-mode`; the snapshot/restore machinery is gone; a host refusal (`RouteAdmissionException`) is logged as `TTS_PLAYBACK_REFUSED`, counted as a failed playback and not retried. Requires multiroom-api 0.1.21 | 0.1.5 | [specs/006-announcement-ducking/](specs/006-announcement-ducking/) |
+| `006-announcement-ducking` | Announcements join their target in `duck-others` (default) or `mix` instead of stopping it and restoring it afterwards: `playbackMode` per request and `playback.default-mode`; the snapshot/restore machinery is gone; a host refusal (`RouteAdmissionException`) is logged as `TTS_PLAYBACK_REFUSED`, counted as a failed playback and not retried. Requires multiroom-api 0.1.21 | 0.1.5 | [.specify/archive/006-announcement-ducking/](.specify/archive/006-announcement-ducking/) |
 | `007-failed-start-cleanup` | An announcement that fails to start ends once, as `TTS_PLAYBACK_FAILED`, with one queue signal: the listener leaves a destroyed route that never went live (`startedAt == null`) to the failure path, `cancel` reports whether it removed the entry, and `abandon` signals the queue only then. No API bump (still 0.1.21) | 0.1.6 | [specs/007-failed-start-cleanup/](specs/007-failed-start-cleanup/) |
 | `008-malformed-target-name` | A `targetName` that breaks the hub's ID rule (`"living room"`) answers 400 `TARGET_NOT_FOUND` instead of escaping as a 500 once hub 026 removed the global v1 exception mapper; only the ID construction is caught; the rule is stated in the OpenAPI description. No API bump (still 0.1.21) | 0.1.7 | [specs/008-malformed-target-name/](specs/008-malformed-target-name/) |
 
@@ -192,6 +192,17 @@ And every distinct tag value is a new series that lives until restart.
 value that does not apply, never a missing tag (`PrometheusNamesTest` checks the scrape). Tags
 never come from caller free text: not the message, voice, language, style prompt, announcement id,
 an unconfigured provider name, an exception message, or a secret.
+
+### ⚠️ The Playback Mode Is A String Until `PlaybackMode.fromName` Parses It
+**Issue:** `duck_others` or `DuckOthers` is accepted, `replace` slips through, or a bad mode answers
+the generic "Request body could not be read" instead of naming the mode.
+**Root Cause:** Spring's lenient enum binding accepts `duck_others`, `DuckOthers` and `duckothers`
+and fails without this module's `multiroom-tts:` prefix; an enum-typed DTO field fails in Jackson
+before the service sees it; `RouteJoinMode` can represent `REPLACE`.
+**Prevention Rule:** Bind `playback.default-mode` and `SpeakRequest.playbackMode` as `String`, parse
+both with `PlaybackMode.fromName` (exactly `duck-others`/`mix`, case-insensitive) — at start-up in
+`TtsProperties.validate()`, per request in `TtsService` before the target lookup and any synthesis —
+and carry the extension's own `PlaybackMode`, never `RouteJoinMode`, until the route is created.
 
 ### ⚠️ Never Unregister The Announcement's Ephemeral Input
 **Issue:** `IllegalArgumentException("Input '…' is not registered")` when an announcement ends.

@@ -4,6 +4,12 @@
 > story blocks under "Story details"), a "Metrics" requirements group, metrics entities, edge cases
 > and success criteria, a new `## Assumptions` section (AS-001–AS-009), and 001/FR-032 annotated
 > for the unreadable-body answer. Earlier revisions are recorded at the end of this file.
+> **Revision**: 2026-10-15 — archived `.specify/archive/006-announcement-ducking`: announcements join their
+> target in `duck-others` or `mix` instead of stopping and restoring it — four stories, the playback
+> mode, host-refusal and compatibility requirements, the `Playback mode` and `Playback settings`
+> entities, the lifecycle without snapshot or restore, edge cases, success criteria and AS-010–AS-016.
+> 001/FR-006–FR-009 and the `Speak request` entity annotated; the 001 definition of `Announcement
+> task` and 001/SC-006 superseded (user-confirmed); host coupling raised to API 0.1.21.
 
 **Scope**: one extension for the multiroom audio system — text-to-speech announcements delivered to a
 room or a group of rooms.
@@ -11,8 +17,9 @@ room or a group of rooms.
 ## What the product does
 
 A caller (an automation, a script, Home Assistant) sends a line of text and a target. The extension
-synthesizes speech through a configured provider, caches the audio, plays it on the target, and
-restores whatever the room was doing before.
+synthesizes speech through a configured provider, caches the audio, and plays it on the target over
+whatever the room is doing — lowered by default, never stopped *(since 006; until then it stopped
+the room and restored it afterwards)* [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-001].
 
 - **Trigger**: HTTP, on the host's single port, under this extension's own `/api/tts/**` paths. There
   is no separate authentication layer — access control is whatever guards the shared HTTP surface
@@ -23,10 +30,14 @@ restores whatever the room was doing before.
   is in effect) + **the audio format the entry was converted to**. Survives restarts; LRU eviction
   at a configurable size
 - **Playback**: the cached WAV is registered as an ephemeral input and routed to the target
-  (`SINGLE_OUTPUT` or `OUTPUT_GROUP`, the host's own `TargetType`). Announcements queue behind
-  whatever is playing
+  (`SINGLE_OUTPUT` or `OUTPUT_GROUP`, the host's own `TargetType`). Since 006 the route joins the
+  target beside what already plays, in the playback mode `duck-others` (default: the host lowers
+  everything else and restores it afterwards) or `mix` (equal level); announcements to one target
+  queue behind each other, not behind the room's music
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-001, FR-004, FR-009]
 - **Completion**: observed, never estimated — the host destroys the announcement's route at EOF and
-  publishes `RouteDestroyedEvent`; restoration hangs off that event
+  publishes `RouteDestroyedEvent`; releasing the announcement's resources hangs off that event.
+  Since 006 nothing is restored by this extension [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-002, FR-005]
 - **Queue**: in memory only. Unplayed announcements are dropped on restart; they are time-sensitive
   and worthless afterwards
 - **Metrics** *(since 005)*: announcements, provider synthesis time and work, cache use and
@@ -79,6 +90,16 @@ new endpoint or field; one behaviour change: an unreadable speak body now gets t
 (v0.1.4); the operator guide is [docs/metrics.md](../../docs/metrics.md). The REST contract stays
 004's v0.1.3.
 
+**Announcements over what is playing** in 0.1.5 by `006-announcement-ducking` (archived here
+2026-10-15): an announcement no longer stops the target's routes and recreates them afterwards; its
+route joins the target in `duck-others` (the host lowers the rest) or `mix`, chosen per request
+(`playbackMode`) or by `multiroom.tts.playback.default-mode`. A route the host refuses (route
+limit) is logged, counted as a failed playback and dropped. Requires multiroom-api 0.1.21
+(multiroom-ai 023). Its contract
+([tts-rest-api.yaml](../archive/006-announcement-ducking/contracts/tts-rest-api.yaml), v0.1.5) adds
+`playbackMode` and supersedes 004's
+[Source: .specify/archive/006-announcement-ducking/spec.md -> FR-012, FR-013].
+
 Features in progress live under [specs/](../../specs/) until they are archived here.
 
 ## User stories
@@ -108,15 +129,19 @@ Features in progress live under [specs/](../../specs/) until they are archived h
 | Compare provider latency and reliability | P1 | Per configured provider: synthesis time (miss only), failures by error code, characters sent and seconds of audio returned, so time per 1,000 characters and the real-time factor are comparable | 005 |
 | Watch the cache work | P2 | Hit and miss counts; cache bytes, entries and limit matching `GET /api/tts/cache/stats`, and emptied after a clear | 005 |
 | Spot backlog and playback failures | P3 | Queue depth per target, back to zero once drained; dequeued announcements counted as playback `started` or `failed` | 005 |
+| The music keeps playing under an announcement | P1 | Music on the target never stops: lowered while the announcement plays, back at its level from where it is by then; no route but the announcement's is stopped or created | 006 |
+| Group announcements over group music | P2 | A group announcement plays in sync on every member over each member's own lowered music; an announcement to one member lowers only that member | 006 |
+| A refused announcement explains itself and leaves the room alone | P2 | An announcement the host refuses (route limit) plays nowhere, changes nothing playing, leaves nothing reserved behind, is logged with the host's reason and counted; the queue moves on | 006 |
+| Choose not to lower the room | P3 | `mix` by configuration or per request keeps the music's level; the request's mode wins; any other mode is a 400 or a start-up fault | 006 |
 
 Sources: [001](../archive/001-tts-extension/spec.md), [002](../archive/002-google-voice-selection/spec.md),
 [003](../archive/003-google-service-account-auth/spec.md), [004](../archive/004-gemini-tts-provider/spec.md),
-[005](../archive/005-tts-metrics/spec.md).
+[005](../archive/005-tts-metrics/spec.md), [006](../archive/006-announcement-ducking/spec.md).
 
 ### Story details
 
 Stories archived before 005 keep their full blocks in the archived spec named in the Source column.
-The actor in every story below is the **operator**: the person who runs the host, configures the
+The actor in every 005 story below is the **operator**: the person who runs the host, configures the
 TTS providers and watches the system through Prometheus and Grafana.
 
 #### See announcement volume and failures (Priority: P1)
@@ -245,6 +270,117 @@ playback failure count.
 4. **Given** a queued announcement is dequeued, **When** its playback cannot start, **Then** the
    playback count tagged `failed` rises by one.
 
+#### The music keeps playing under an announcement (Priority: P1)
+
+[Source: .specify/archive/006-announcement-ducking/spec.md -> User Story 1]
+
+Music is playing in the kitchen. An automation announces "the washing machine has finished" there.
+The music does not stop: it drops to a quiet background level, the announcement is heard clearly
+over it, and the music comes back up when the announcement ends — from where it is by then, with no
+gap, no restart and no lag while a route is rebuilt.
+
+**Why this priority**: This is the whole feature. Before 006 an announcement stopped the room's
+routes when it was accepted, and recreated them after it ended, so every announcement cost two
+audible gaps and a restart of the music (a stream re-buffers, a file starts over).
+
+**Independent Test**: Play a continuous source on one output, send one announcement to that output,
+and listen: the source never goes silent, is quieter while the announcement plays, and is back at its
+previous level within a second of the announcement ending.
+
+**Acceptance Scenarios**:
+
+1. **Given** music is playing on an output, **When** an announcement is sent to that output, **Then**
+   the music keeps playing without a gap, lowered while the announcement plays, and the announcement
+   is heard at full level.
+2. **Given** an announcement is playing over lowered music, **When** the announcement ends, **Then**
+   the music returns to its previous level and continues from where it is, not from where it was when
+   the announcement began.
+3. **Given** music is playing on an output, **When** an announcement is sent to it, **Then** no route
+   on that output is stopped or created by this extension apart from the announcement's own, and the
+   route that was playing keeps its identity throughout (an integration showing "current source", such
+   as Home Assistant, shows the music during and after the announcement).
+4. **Given** nothing is playing on an output, **When** an announcement is sent to it, **Then** it
+   plays exactly as before 006, and the output is silent again afterwards.
+5. **Given** an announcement was accepted for a busy output, **When** it is still waiting in that
+   target's queue, **Then** the music on that output keeps playing at its normal level until the
+   announcement actually starts.
+
+#### Group announcements over group music (Priority: P2)
+
+[Source: .specify/archive/006-announcement-ducking/spec.md -> User Story 2]
+
+Music plays on the "downstairs" group. An announcement is sent to the whole group, or to one room in
+it.
+
+**Why this priority**: Group targets are an existing, supported target type, and their behaviour must
+be defined; but the single-room case already delivers the value.
+
+**Independent Test**: Play music on a group, announce on the group and then on one member, and
+listen in each room.
+
+**Acceptance Scenarios**:
+
+1. **Given** music is playing on a group, **When** an announcement is sent to the group, **Then** it
+   is heard on every member, in sync, and the music is lowered on every member.
+2. **Given** music is playing on a group, **When** an announcement is sent to one member output,
+   **Then** the music is lowered on that output only and continues unchanged, and in sync, on the
+   other members.
+3. **Given** different music plays on two members of a group, **When** an announcement is sent to the
+   group, **Then** each member's own music is lowered under it and restored afterwards.
+
+#### A refused announcement explains itself and leaves the room alone (Priority: P2)
+
+[Source: .specify/archive/006-announcement-ducking/spec.md -> User Story 3]
+
+The host limits how many routes may play on one output at once. An announcement that the host refuses
+must fail cleanly: the room keeps playing what it was playing, and the operator can see why.
+
+**Why this priority**: Under the old behaviour the target was always emptied first, so the host never
+refused an announcement. Joining instead of replacing introduces a new way to fail, and it must not
+leave state behind.
+
+**Independent Test**: Fill an output to the host's route limit, send an announcement to it, and
+confirm that nothing already playing changes, the failure is logged with the host's reason, and it is
+counted in the extension's metrics.
+
+**Acceptance Scenarios**:
+
+1. **Given** an output already holds the host's maximum number of routes, **When** an announcement to
+   it reaches the front of its queue, **Then** it is not played, every route already on the output
+   keeps playing unchanged, and the log names the announcement, the target, the output and the host's
+   reason.
+2. **Given** an announcement was refused by the host, **Then** nothing it reserved is left behind: no
+   registered input, no pinned cache entry, no temporary file, no resolver entry, and the next queued
+   announcement for that target starts.
+3. **Given** a group announcement where one member is at the route limit, **Then** it plays on no
+   member at all (the host admits a group route on all members or none).
+
+#### Choose not to lower the room (Priority: P3)
+
+[Source: .specify/archive/006-announcement-ducking/spec.md -> User Story 4]
+
+Some announcements are better heard alongside the music at equal level — a short chime, or a room
+where the operator does not want the music to dip. The operator sets this once in configuration; a
+caller may also choose it per request.
+
+**Why this priority**: Lowering is the right default for speech; this is a refinement for a minority
+of uses, and it costs one setting because the host already supports the mode.
+
+**Independent Test**: Configure the extension (or send a request) to mix rather than lower, announce
+over music, and confirm the music level does not change.
+
+**Acceptance Scenarios**:
+
+1. **Given** no playback mode is configured or requested, **When** an announcement plays over music,
+   **Then** the music is lowered (*duck-others*).
+2. **Given** the configured playback mode is *mix*, **When** an announcement plays over music,
+   **Then** both are heard and the music's level does not change.
+3. **Given** any configured mode, **When** a request names a mode, **Then** the request's mode is
+   used for that announcement only.
+4. **Given** a request or configuration names a mode other than *duck-others* or *mix* (for example
+   *replace*, or a misspelling), **Then** a request is rejected with `INVALID_REQUEST` before any
+   synthesis and a configuration aborts start-up naming the extension and the key.
+
 ## Requirements
 
 IDs belong to the feature that defined them and are cited as `NNN/FR-nnn` (`001/FR-008`,
@@ -264,6 +400,9 @@ the archived spec behind an ID for its full wording.
 - **001/FR-031** Format conversion only through the injected
   `multiroom.api.conversion.FormatConverter` (promoted from core, released in API 0.1.18); no
   resampling, mixing or bit-depth code here
+- **006/FR-013** The extension declares multiroom-api 0.1.21 as its minimum, so that a host without
+  join modes refuses to load it instead of loading an extension that relies on them
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-013]
 
 ### Request and trigger
 
@@ -284,6 +423,9 @@ the archived spec behind an ID for its full wording.
   `google-cloud` only. Sending any of them to another provider type is a 400 naming the field and
   the type, before any synthesis. *Amended by 004*: `speakingRate` is also accepted by
   `google-gemini`; `engine` and `pitch` stay `google-cloud` only (004/FR-011, FR-022)
+- **006/FR-012** Every existing request remains valid and behaves as described under Playback
+  without change; the playback-mode request field is optional, and the success response's shape is
+  unchanged [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-012]
 - **004/FR-021** A request may carry `stylePrompt` — for `google-gemini` only. Any `stylePrompt`
   present (even empty or whitespace) sent to another type is a 400 naming the field and the type
 - **001/FR-027** Structured log events: request received, cache hit/miss, synthesis
@@ -558,12 +700,58 @@ the unreadable-body answer noted under 001/FR-032.
 ### Playback
 
 - **001/FR-006, FR-007** Register an ephemeral input for the WAV and route it to the output, or to
-  the group as **one** route (one pipeline, hence rooms in sync)
+  the group as **one** route (one pipeline, hence rooms in sync). *Since 006 unchanged*: a group
+  target is still played as one route to the group (006/FR-006)
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-006]
 - **001/FR-008** Restore the target's prior routes when the announcement ends, detected from
   `RouteDestroyedEvent`, never a timer. The input is registered with `autoRemove = true` and this
-  module never unregisters it itself
+  module never unregisters it itself. *Amended by 006*: nothing is restored — no snapshot is kept
+  and no route is recreated (006/FR-002). Completion is still observed from the route-destroyed
+  signal, never a timer, and still releases everything the announcement held: cache pin, resolver
+  entry, temporary file and the queue slot. The input is still auto-removed and never unregistered
+  by this extension **after its route exists**; a route the host refused leaves no route to
+  auto-remove it, so then the extension unregisters it (006/FR-007)
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-005]
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-002]
 - **001/FR-009** A per-target in-memory queue that serializes **playback only**: validation, cache,
-  synthesis and conversion finish before the response, so what is queued already has its file
+  synthesis and conversion finish before the response, so what is queued already has its file.
+  *Amended by 006*: it keeps serializing announcements for one target in arrival order, so two
+  announcements to the same target never overlap; queues stay keyed by target, not by output, so
+  announcements to overlapping targets (a group and one of its members) are not serialized against
+  each other [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-004]
+- **006/FR-001** An announcement is played by adding its own route to the target alongside whatever
+  already plays there, in the effective playback mode (006/FR-009), and never stops, pauses or
+  recreates any other route on the target — before, during or after playback
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-001]
+- **006/FR-002** The extension keeps no snapshot of the target's routes, and recreates no routes
+  when an announcement ends or fails. Restoring the other routes' level is the host's job and
+  happens without any action from this extension
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-002]
+- **006/FR-003** Accepting an announcement into a target's queue changes nothing audible on the
+  target; only the announcement's own start does
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-003]
+- **006/FR-007** When the host refuses the announcement's route (route limit, or any other route
+  failure), the extension releases everything the announcement reserved — including unregistering
+  its input, since no route exists to auto-remove it — leaves every other route on the target
+  untouched, and moves the target's queue on to the next announcement. A refused announcement is
+  never retried: announcements are time-sensitive, and a late one is worse than none
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-007]
+- **006/FR-008** A host refusal is logged with the announcement id, the target, and the host's
+  reason and offending output when the host gives them, and is counted as a failed playback in the
+  existing metrics without adding a tag key to any existing metric and without any caller text as a
+  tag value [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-008]
+- **006/FR-009** The effective playback mode of an announcement is the mode named in the request if
+  any, otherwise the configured default, otherwise *duck-others*. The configured default is one
+  value for the whole extension; there is no per-target default
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-009]
+- **006/FR-010** Only *duck-others* and *mix* are accepted as playback modes, in configuration and
+  per request, case-insensitively. Any other value is rejected: per request with `INVALID_REQUEST`
+  (400) before any cache lookup or synthesis; in configuration by aborting start-up with a message
+  naming this extension and the key [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-010]
+- **006/FR-014** The REST contract, configuration reference and README describe the playback
+  behaviour, the playback-mode field and setting, the host-side ducking settings that govern the
+  level and fade, and the deployment order (host first)
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-014]
 - **001/FR-024** Shutdown lets the current announcement finish and discards the queue.
   `enabled=false` is a start-up state, never a runtime transition
 
@@ -584,6 +772,8 @@ the unreadable-body answer noted under 001/FR-032.
 - **001/FR-020** A missing or corrupt entry is a miss and is replaced
 - **001/FR-025** A failed cache write still plays, from a temp file outside the cache that is
   deleted afterwards, with a warning
+- **006/FR-011** The playback mode is not part of the cache key: the same text in another mode is
+  the same audio and is a cache hit [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-011]
 
 ## Key entities
 
@@ -594,7 +784,9 @@ the unreadable-body answer noted under 001/FR-032.
 
 - **Speak request** — text, target name, `TargetType`, optional provider / voice / language,
   (`google-cloud` only) engine / pitch, (both Google types) speaking rate, and (`google-gemini`
-  only, since 004) style prompt
+  only, since 004) style prompt. Since 006 also an optional `playbackMode` (a `String`, `null` = not
+  given); an unknown value is `INVALID_REQUEST` before target lookup, cache lookup or synthesis
+  [Source: .specify/archive/006-announcement-ducking/data-model.md -> "SpeakRequest / AnnounceCommand"]
 - **Provider configuration** — name, type, credentials, default voice and language, engine,
   timeout, and (Google only) pitch and speaking rate; since 004, `model` and `style-prompt`
   (`google-gemini` only). The list plus `default-provider` under `multiroom.tts`. Since 002,
@@ -631,8 +823,22 @@ the unreadable-body answer noted under 001/FR-032.
 - **Cache entry** — SHA-256 over every key dimension names `<hash>.wav`, a playable WAV in the
   native format; `index.json` records provider, `formatTag`, size and last access. An entry without
   a `formatTag` reads as a miss. Pinned entries are never evicted
-- **Announcement task** — a ready-to-route announcement: its file, target and route snapshot. The
-  per-target queue is bounded (default 10) and never persisted
+- **Announcement task** *(redefined by 006)* — a ready-to-route announcement: its file, target and
+  playback mode (the effective mode, resolved when the request is accepted and used when the route
+  is created). It no longer carries a snapshot of the target's routes. The per-target queue is
+  bounded (default 10) and never persisted
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Announcement task"]
+  [Source: .specify/archive/006-announcement-ducking/data-model.md -> "AnnouncementTask (changed)"]
+- **Playback mode** *(006)* — how the announcement's route joins the target: *duck-others*
+  (default; lowers everything else on the target's outputs to the host's ducking level while it is
+  the newest lowering route there, restored by the host) or *mix* (equal level). A subset of the
+  host's join modes; *replace* is deliberately excluded and not representable
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Playback mode"]
+  [Source: .specify/archive/006-announcement-ducking/data-model.md -> "PlaybackMode (new enum, `multiroom.tts.config`)"]
+- **Playback settings** *(006)* — configuration: the default playback mode for every announcement
+  (`multiroom.tts.playback.default-mode`, `duck-others`), validated at start-up and skipped when
+  `multiroom.tts.enabled=false` [Source: .specify/archive/006-announcement-ducking/spec.md -> "Playback settings"]
+  [Source: .specify/archive/006-announcement-ducking/data-model.md -> "PlaybackProperties (new, `multiroom.tts.playback`)"]
 - **Announcement count** *(005)* — how many announcement requests arrived, by outcome, error code,
   rejection reason and provider [Source: .specify/archive/005-tts-metrics/spec.md -> "Announcement count"]
 - **Synthesis timing** *(005)* — the duration and number of provider syntheses, with a bucketed
@@ -657,7 +863,7 @@ the unreadable-body answer noted under 001/FR-032.
 [Source: .specify/archive/001-tts-extension/data-model.md]
 
 ```text
-RECEIVED → VALIDATED            (or REJECTED → 400)
+RECEIVED → VALIDATED            text, then playbackMode (006), target, provider (or REJECTED → 400)
   → RESOLVED    provider.resolveSettings: pure, no I/O          (or REJECTED → 400)
   → CACHE_CHECK → hit:  AUDIO_READY (pinned)                    — no catalogue work at all
                 → miss: [Google service account: token first → or FAILED 503, check skipped]
@@ -666,13 +872,21 @@ RECEIVED → VALIDATED            (or REJECTED → 400)
                         SYNTHESIZING (a 401 renews the token and resends once)
                         → CONVERTING → AUDIO_READY                (or FAILED → 503)
                         token, catalogue fetch and synthesis share the entry's timeout
-  → QUEUED
-  → ROUTING   snapshot + stop the target's routes; registerInput("tts://<uuid>", autoRemove);
-              createRoute — core resolves tts:// to the WAV's file:// URI
-  → PLAYING   … RouteDestroyedEvent
-  → RESTORING re-create the snapshot, unpin, drop any temp file
+  → QUEUED      nothing audible changes; an enqueue failure unpins / deletes the spill file → 503
+  → ROUTING   registerInput("tts://<uuid>", autoRemove); createRoute(input, target, playback
+              mode) — core resolves tts:// to the WAV's file:// URI. No snapshot, nothing stopped
+              (since 006)
+              host refusal (RouteAdmissionException) → WARN TTS_PLAYBACK_REFUSED, playback failed;
+              other failure → ERROR; either way: unpin, release, delete, unregisterInput → next
+  → PLAYING   others lowered by the host under duck-others … RouteDestroyedEvent
+  → RELEASING unpin, release the resolver entry, drop any temp file → next in queue
+              (input removed by core's auto-remove; other routes restored by the host)
   → COMPLETED
 ```
+
+Until 006 the ROUTING step snapshotted and stopped the target's routes, and a RESTORING step
+recreated them after `RouteDestroyedEvent`; both are gone
+[Source: .specify/archive/006-announcement-ducking/data-model.md -> "Announcement lifecycle"].
 
 Since 005 the flow is unchanged but observed: every answered request is counted, the cache lookup
 is counted hit or miss, a synthesis is timed and its characters measured once immediately before
@@ -685,7 +899,8 @@ the provider call (conversion outside the timing), and the playback start is cou
 
 - Unknown target or provider: rejected before any synthesis
 - Concurrent requests for one target: both synthesized as they arrive, played in arrival order, no
-  deduplication
+  deduplication. Since 006 the second never lowers the first (the per-target queue is unchanged)
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Two announcements for the same target"]
 - Cache disk full: plays anyway, caching skipped for that request
 - Disabled extension: no beans for the whole run — and so no metrics at all, not even zero-valued
   series; "disabled mid-playback" cannot happen
@@ -757,6 +972,38 @@ the provider call (conversion outside the timing), and the playback start is cou
   [Source: .specify/archive/005-tts-metrics/spec.md -> "A malformed or incomplete request body"]
 - *(005)* Reading the metrics endpoint does not synthesize, touch the disk or contact a provider
   [Source: .specify/archive/005-tts-metrics/spec.md -> "Reading the metrics endpoint"]
+- *(006)* Announcements for overlapping targets (one to the group, one to a member, each with its
+  own queue) may play at the same time on the shared output. The host puts the newer one on top and
+  lowers the older one with the music; each is restored as the one above it ends. This replaced the
+  pre-006 behaviour, where the second announcement stopped the first one's route
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Announcements for overlapping targets"]
+- *(006)* Another integration starts a source on the output during an announcement (Home Assistant
+  source select, Chromecast auto-route, a REST replace): the announcement is not cut off; the new
+  source starts lowered beneath it and comes up when it ends. This is the host's rule; nothing here
+  restores or recreates anything
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Another integration starts a source on the output"]
+- *(006)* The music is stopped by someone else during an announcement: the announcement plays to
+  its end, and the room is silent afterwards. This extension never recreates a route it did not
+  create [Source: .specify/archive/006-announcement-ducking/spec.md -> "The music is stopped by someone else"]
+- *(006)* An explicit stop of everything on the output (MQTT STOP, REST stop-all) during an
+  announcement: the announcement ends too, its resources are released, and the next queued
+  announcement starts
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "An explicit stop of everything on the output"]
+- *(006)* A very short announcement (shorter than the host's fade): handled by the host without a
+  click; nothing changes here [Source: .specify/archive/006-announcement-ducking/spec.md -> "A very short announcement"]
+- *(006)* The host's ducking level and fade time are system-wide host settings; this extension
+  neither sets nor overrides them
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "The host's ducking level and fade time"]
+- *(006)* A host older than multiroom-api 0.1.21 refuses to load this JAR at start-up because of its
+  declared API requirement; the extension is absent rather than half-working. Upgrading the host
+  first is part of deployment
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "A host older than multiroom-api 0.1.21"]
+- *(006)* Shutdown during an announcement: the current announcement finishes and the queue is
+  discarded; there is no longer anything to restore
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Shutdown during an announcement"]
+- *(006)* A route that was waiting to be restored at upgrade time cannot exist — restoration state
+  was in memory only and is gone after the restart the upgrade requires
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "A route that was waiting to be restored at upgrade time"]
 
 ## Success criteria
 
@@ -770,7 +1017,6 @@ repository boots the host.
 | 001/SC-003 unavailable provider | error < 10 s at the default timeout | By the 10 s default |
 | 001/SC-004 switch provider | configuration + restart only | By design |
 | 001/SC-005 queue order | 100 % in submission order | Unit-tested |
-| 001/SC-006 restore | < 1 s after `RouteDestroyedEvent` (drain excluded) | Not yet timed |
 | 001/SC-007 hit → playback | < 1 s | Not yet measured |
 | 001/SC-008 cache transparency | same audio either way | By design |
 | 002/SC-001 the 2026-09-24 incident | `uk-UA-Chirp3-HD-Charon`, no language, plays first time | Tests + production run (T068) |
@@ -809,8 +1055,20 @@ repository boots the host.
 | 005/SC-006 no metrics / disabled | a host without metrics support serves announcements; `enabled=false` contributes nothing | `TtsAutoConfigurationMetricsTest`; local-core run (T048) |
 | 005/SC-007 guide suffices | an operator writes the "share timed out per provider" query from `docs/metrics.md` alone; every query returns data once its event has happened | Local-core run with a forced timeout and full queue (T048) |
 
+| 006/SC-001 no interruption | music on the target interrupted for 0 ms, no restart of the source | Unit-tested (no `stop*` call); production check T036 |
+| 006/SC-002 level back | music at its previous level within 1 s of the announcement's last audible sample (the host's ducking-release target) | Production check T036 |
+| 006/SC-003 busy output | a cache hit on a busy output starts no later than on an idle one (< 1 s request to sound) | Nothing is stopped first by design; production check T036 |
+| 006/SC-004 no foreign route events | 50 consecutive announcements over music on the production device: zero routes other than the announcements' own stopped or created | `verifyNoMoreInteractions(routeService)`; production check T036 |
+| 006/SC-005 refusal leaves nothing | 0 registered inputs, pinned entries, temp files or resolver entries left; nothing audible changed | Unit-tested (`TtsServiceTest`, `PlaybackCompletionListenerTest`); quickstart §7 only with the user's permission |
+| 006/SC-006 compatibility | 100 % of existing request bodies accepted unchanged; every pre-upgrade cache entry still a hit | `CacheKeyTest` pinned hashes unchanged; controller tests |
+| 006/SC-007 Home Assistant | shows the room's music as its source during and after an announcement, no flicker | Production check T036 |
+
 Sources for the 005 rows: [.specify/archive/005-tts-metrics/spec.md -> SC-001–SC-007], status from
 [.specify/archive/005-tts-metrics/tasks.md -> T041, T047, T048].
+Sources for the 006 rows: [.specify/archive/006-announcement-ducking/spec.md -> SC-001–SC-007], status from
+[.specify/archive/006-announcement-ducking/tasks.md -> T035, T036] and
+[.specify/archive/006-announcement-ducking/plan.md -> "Testing"]. T036 is marked done; its results were
+recorded in the pull request, not in the feature's artifacts.
 
 ## Assumptions
 
@@ -849,10 +1107,42 @@ Sources for the 005 rows: [.specify/archive/005-tts-metrics/spec.md -> SC-001–
   [Source: .specify/archive/005-tts-metrics/spec.md -> "The version becomes 0.1.4"]
 - **AS-009** Dashboards and alert rules are out of scope; the documentation gives example queries
   only [Source: .specify/archive/005-tts-metrics/spec.md -> "Dashboards and alert rules are out of scope"]
+- **AS-010** Replace is not offered as a playback mode. Replace without restoration would silence
+  the room permanently after an announcement; replace with restoration is the stop–restore
+  behaviour 006 removed. Dropping it let the snapshot and restore machinery go
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Replace is not offered."]
+- **AS-011** The mode is passed per route, not declared on the input. Announcement inputs are
+  ephemeral and created by this extension for each announcement, so naming the mode on the route
+  request is the direct form; the result is the same
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "The mode is passed per route, not declared on the input."]
+- **AS-012** The per-target queue stays. The host would let two announcements on one output overlap,
+  with the newer on top and the older lowered underneath; for speech that means a listener misses
+  part of the first one, so serial playback per target is kept. Overlapping *targets* (a group and
+  its member) are not coordinated
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "The per-target queue stays."]
+- **AS-013** The host's ducking settings are the only ducking settings. Level (about −15 dB) and
+  fade (about 150 ms) are system-wide host configuration; per-announcement or per-extension levels
+  are out of scope
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "The host's ducking settings are the only ducking settings."]
+- **AS-014** Refusals happen after the request was accepted. Routing runs when the announcement
+  reaches the front of its queue, after the caller has had its success response, so a host refusal
+  is reported in logs and metrics, not to the caller. Predicting a refusal at request time would be
+  racy and is out of scope. A known issue: a full room still gets `202`. A later feature may refuse
+  at request time when the target's queue is empty and an output is already at the host's route
+  limit, which needs that limit in multiroom-api first
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Refusals happen after the request was accepted."]
+- **AS-015** Deployment order: the host (multiroom-ai with 023) is upgraded first, then this JAR is
+  redeployed; the starter parent and the API requirement move to 0.1.21 together
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Deployment order"]
+- **AS-016** Audible behaviour is verified on the production device after deployment, as for
+  earlier playback-affecting changes; the unit tests cover the routing calls and cleanup
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> "Audible behaviour is verified on the production device"]
 
 ## Host coupling
 
-Built against `multiroom-api` **0.1.18**, resolved from the local `~/.m2`; the host repository is
+Built against `multiroom-api` **0.1.21** since 006 (0.1.18 before; 006 needs its join modes and
+`RouteAdmissionException`) [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"],
+resolved from the local `~/.m2`; the host repository is
 `D:\projects-multiroom\multiroom-ai`. The required version is pinned in `pom.xml` and advertised in
 the JAR manifest as `Require-API-Version`. See the Upstream Contract in
 [constitution.md](constitution.md).

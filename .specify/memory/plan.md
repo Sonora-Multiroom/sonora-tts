@@ -6,14 +6,21 @@
 > host's `/actuator/prometheus` and the unreadable-body answer; metrics design decisions and
 > testing notes; T048 recorded and T049 recorded as user-performed. Earlier revisions are recorded
 > at the end of this file.
+> **Revision**: 2026-10-15 — archived `.specify/archive/006-announcement-ducking`: `PlaybackMode` and
+> `PlaybackProperties` in the tree, `PlaybackCompletionListener` without `RouteService`; starter and
+> `multiroom-api` 0.1.21; `multiroom.tts.playback.default-mode` and the host's `audio.mixing.*`
+> keys; `playbackMode` on the HTTP surface and 006's contract v0.1.5; refusals under
+> `tts_playbacks_total{outcome="failed"}`; the completion decision rewritten (no restore) and 006's
+> design decisions added; testing notes; T035/T036 recorded.
 
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
 [Source: .specify/archive/001-tts-extension/plan.md], `002-google-voice-selection`
 [Source: .specify/archive/002-google-voice-selection/plan.md],
 `003-google-service-account-auth` [Source: .specify/archive/003-google-service-account-auth/plan.md]
-`004-gemini-tts-provider` [Source: .specify/archive/004-gemini-tts-provider/plan.md] and
-`005-tts-metrics` [Source: .specify/archive/005-tts-metrics/plan.md].
+`004-gemini-tts-provider` [Source: .specify/archive/004-gemini-tts-provider/plan.md],
+`005-tts-metrics` [Source: .specify/archive/005-tts-metrics/plan.md] and
+`006-announcement-ducking` [Source: .specify/archive/006-announcement-ducking/plan.md].
 
 ## Shape
 
@@ -21,7 +28,8 @@ A single Maven module producing one shaded JAR, `multiroom-tts.jar`, dropped int
 `extensions/` directory.
 
 ```text
-pom.xml                    # parent: ai.multiroom:multiroom-extension-starter:0.1.18, <relativePath/> EMPTY
+pom.xml                    # parent: ai.multiroom:multiroom-extension-starter:0.1.21 (since 006),
+                           #   <relativePath/> EMPTY; multiroom.require_api_version 0.1.21
 src/main/java/multiroom/tts/
 ├── TtsAutoConfiguration.java  # the entry point — @AutoConfiguration,
 │                              #   @ConditionalOnProperty("multiroom.tts.enabled", matchIfMissing),
@@ -31,7 +39,9 @@ src/main/java/multiroom/tts/
 ├── config/                    # TtsProperties @ConfigurationProperties("multiroom.tts") + nested
 │                              #   cache/queue/provider config; ALL defaults and start-up
 │                              #   validation live here; ProviderType.configName() (005: the
-│                              #   configuration spelling, also the `type` metric tag)
+│                              #   configuration spelling, also the `type` metric tag);
+│                              #   006: PlaybackMode (DUCK_OTHERS|MIX, fromName, configName,
+│                              #   joinMode) and PlaybackProperties (playback.default-mode)
 ├── metrics/                   # 005: TtsMetrics (the event seam), MicrometerTtsMetrics (the ONLY
 │                              #   class importing io.micrometer: meters, tag rules, buckets, cache
 │                              #   and queue gauges), NoopTtsMetrics, SynthesisUsage (the work one
@@ -62,10 +72,12 @@ src/main/java/multiroom/tts/
 ├── cache/                     # AudioCache / FilesystemAudioCache: index.json + <sha256>.wav, LRU, pins
 ├── queue/                     # AnnouncementQueueManager: per-target queue + worker, SmartLifecycle;
 │                              #   depth(key) and QueueRejectedException (QUEUE_FULL|SHUTTING_DOWN,
-│                              #   still PROVIDER_ERROR to the caller) since 005
+│                              #   still PROVIDER_ERROR to the caller) since 005; AnnouncementTask
+│                              #   carries the playback mode, no route snapshot, since 006
 ├── service/                   # TtsService (validate → resolve → cache → synthesize → convert →
-│                              #   enqueue), PlaybackCompletionListener (@EventListener
-│                              #   RouteDestroyedEvent), VoiceQueryService (voice listing)
+│                              #   enqueue; createRoute in the playback mode), PlaybackCompletionListener
+│                              #   (@EventListener RouteDestroyedEvent; no RouteService since 006),
+│                              #   VoiceQueryService (voice listing)
 └── rest/
     ├── api/                   # TtsApi, TtsCacheApi, TtsVoiceApi: mappings + OpenAPI annotations
     ├── controller/            # TtsController, TtsCacheController, TtsVoiceController (implement them)
@@ -89,7 +101,7 @@ The manifest, written by the inherited parent POM, carries `Extension-Id: tts`,
 
 | Dependency | Scope | Why |
 |---|---|---|
-| `multiroom-api` | `provided` (from the parent) | The whole contract: routing, device registry, `TargetType`, `RouteDestroyedEvent`, `FormatConverter` |
+| `multiroom-api` 0.1.21 | `provided` (from the parent) | The whole contract: routing, device registry, `TargetType`, `RouteDestroyedEvent`, `FormatConverter`; since 006 `RouteJoinMode`, `RouteAdmissionException` and the three-argument `createRoute` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"] |
 | `spring-boot-starter-web`, `-validation`, Jackson | `provided` | Supplied by the host at runtime; bundling risks a class collision with another extension |
 | `spring-boot-configuration-processor` | `provided`, optional | Configuration metadata for `multiroom.tts.*` |
 | `swagger-annotations-jakarta` 2.2.47 | `provided` | `@Operation` / `@ApiResponse` for springdoc; pinned to the copy `multiroom-rest` ships, never bundled |
@@ -104,7 +116,10 @@ The manifest, written by the inherited parent POM, carries `Extension-Id: tts`,
 002, 003 and 004 added no dependency; 005 added only Micrometer, which the host already supplies
 (no `multiroom-api` change, `multiroom.require_api_version` stays 0.1.18). Service-account sign-in uses the JDK's `java.security`
 (`KeyFactory`, `Signature`) — `google-auth-library` was rejected because shading it would bring
-Guava and its own HTTP transport onto the shared classpath.
+Guava and its own HTTP transport onto the shared classpath. 006 added no dependency either, but
+raised the starter parent and `multiroom.require_api_version` to 0.1.21 together, so the manifest
+reads `Require-API-Version: [0.1.21,0.2.0)` and a host without multiroom-ai 023 refuses the JAR;
+deploy the host first [Source: .specify/archive/006-announcement-ducking/research.md -> R8].
 
 ## Configuration
 
@@ -124,6 +139,7 @@ Guava and its own HTTP transport onto the shared classpath.
 | `cache.dir` | `${user.home}/.multiroom/tts-cache` | `java.nio.file.Path` |
 | `cache.max-size-mb` | 500 | LRU above it |
 | `queue.max-depth-per-target` | 10 | |
+| `playback.default-mode` | `duck-others` | Since 006: the playback mode of every announcement whose request names none; `duck-others` or `mix`, case-insensitive; one value for the whole extension. Bound as a `String` and checked in `TtsProperties.validate()`; anything else (`replace` included) aborts start-up: `multiroom-tts: playback.default-mode '<v>' is not one of duck-others, mix` [Source: .specify/archive/006-announcement-ducking/contracts/configuration.md -> "`multiroom.tts.playback`"] |
 | `voice-catalogue.ttl` | `24h` | Per Google entry's own catalogue (`google-gemini` too, since 004) |
 | `voice-catalogue.failure-backoff` | `60s` | No refetch after a failure for this long; also the minimum age before a miss refetches. Since 003, also the token service's back-off |
 | `voice-catalogue.fetch-timeout` | `3s` | Cap on one fetch, inside the entry's `timeout-seconds` |
@@ -161,6 +177,12 @@ the host-side Spring Boot filter `management.metrics.enable.tts=false` drops the
 here; synthesis histogram buckets are derived from the longest configured `timeout-seconds`
 [Source: .specify/archive/005-tts-metrics/research.md -> R3, R12].
 
+Host settings that govern announcements since 006, set in the host's `multiroom.yml` and neither
+read nor overridden here: `audio.mixing.ducking.level-db` (`-15.0`, how far the music drops under
+`duck-others`), `audio.mixing.ducking.fade-millis` (`150`, the lowering and restoring ramp) and
+`audio.mixing.max-routes-per-output` (`4`; an announcement that would exceed it on any target
+output is refused) [Source: .specify/archive/006-announcement-ducking/contracts/configuration.md -> "Host settings that govern the result"].
+
 ## HTTP surface
 
 `/api/tts/**` on the host's single port, owned by this module and documented by the host's springdoc
@@ -177,14 +199,19 @@ Since 002, `POST /api/tts/speak` also takes optional `engine`, `pitch` and `spea
 error enum has nine codes (`INVALID_VOICE` 400, `VOICE_CATALOGUE_UNAVAILABLE` 503 added). 003
 changed no endpoint and added no code: token failures reuse `PROVIDER_ERROR`, `PROVIDER_TIMEOUT`
 and `PROVIDER_RATE_LIMITED`. 004 added no endpoint and no code: `POST /api/tts/speak` takes an
-optional `stylePrompt` (`google-gemini` only), and listed voices gain `gender`.
+optional `stylePrompt` (`google-gemini` only), and listed voices gain `gender`. 006 added no
+endpoint and no code: `POST /api/tts/speak` takes an optional `playbackMode` (`duck-others` or
+`mix`, case-insensitive; anything else is 400 `INVALID_REQUEST` before the cache lookup and any
+synthesis, and not part of the cache identity); the response is unchanged
+[Source: .specify/archive/006-announcement-ducking/plan.md -> "HTTP"].
 
 Deliberately not under `/api/v2/**` (`multiroom-rest`'s contract with `sonora-cli` and
 `sonora-mcp`), and deliberately not RFC 7807 for the same reason. Current contract, versioned with
 the JAR:
-[.specify/archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml](../archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml)
-(v0.1.3 — adds `stylePrompt` and `gender`; supersedes 003's v0.1.2, which was 002's v0.1.1 plus a
-changelog entry; 002's superseded 001's).
+[.specify/archive/006-announcement-ducking/contracts/tts-rest-api.yaml](../archive/006-announcement-ducking/contracts/tts-rest-api.yaml)
+(v0.1.5 — adds `playbackMode` and the playback behaviour; supersedes 004's v0.1.3, which added
+`stylePrompt` and `gender` and superseded 003's v0.1.2, itself 002's v0.1.1 plus a changelog entry;
+002's superseded 001's).
 
 005 added no endpoint and no field. An unreadable `POST /api/tts/speak` body
 (`HttpMessageNotReadableException`) now answers 400 `ErrorResponse(INVALID_REQUEST, "Request body
@@ -212,7 +239,10 @@ Tag values: `provider` is a configured name or `unknown`; `type` the configurati
 (`openai`, `google-cloud`, `google-gemini`, `piper`, `local-http`); `error` a `TtsErrorCode` name,
 `INTERNAL` (HTTP 500 with no code) or `none`; `reason` `queue_full`, `shutting_down` or `none`;
 `tier` a `GoogleEngine` canonical name or `other` (`google-cloud`), the configured model
-(`google-gemini`), or `none`. Contract (v0.1.4):
+(`google-gemini`), or `none`. Since 006, `tts_playbacks_total{outcome="failed"}` also counts
+announcements the host refused (logged `TTS_PLAYBACK_REFUSED`), and an invalid `playbackMode` is
+`tts_announcements_total{outcome="rejected", error="INVALID_REQUEST"}`; no name, tag key or value
+set changed [Source: .specify/archive/006-announcement-ducking/plan.md -> "Metrics"]. Contract (v0.1.4):
 [.specify/archive/005-tts-metrics/contracts/metrics.md](../archive/005-tts-metrics/contracts/metrics.md);
 operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
 
@@ -230,8 +260,10 @@ operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
 - **Conversion is the host's.** The JDK's `AudioSystem` parses the provider's WAV; the injected
   `FormatConverter` converts it once, before the cache write
 - **Completion is `RouteDestroyedEvent`.** `PlaybackCompletionListener` matches the event's input
-  id, restores the snapshotted routes, unpins, and drops any temp file. It does not unregister the
-  input — `autoRemove` already has
+  id, unpins, releases the resolver entry and drops any temp file. It does not unregister the
+  input — `autoRemove` already has. *Since 006* it restores nothing and holds no `RouteService`:
+  the snapshot and restore it did until then are gone
+  [Source: .specify/archive/006-announcement-ducking/plan.md -> "Completion (`PlaybackCompletionListener`)"]
 - **The queue guards the output, not the provider.** Synthesis runs in the request thread so every
   provider failure is reported synchronously; the queue orders only `registerInput` + `createRoute`
 - **One error mapping.** `TtsExceptionHandler` holds the only `TtsErrorCode` → status table and is
@@ -399,6 +431,39 @@ operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
   does no I/O on record; the scrape runs on the actuator's thread. A cache hit costs one in-memory
   increment
 
+[Source: .specify/archive/006-announcement-ducking/plan.md, research.md]
+
+- **Join, do not replace** (R1): the queue worker calls `createRoute(inputId, OutputId|GroupId,
+  task.playbackMode().joinMode())`; `AudioInputDefinition.defaultJoinMode` stays unset on the
+  ephemeral input, so the mode is visible at the call and there is no silent fall-back to `REPLACE`
+- **The stop–snapshot–restore machinery is deleted** (R2): `snapshotAndStopExistingRoutes`,
+  `AnnouncementTask.routeSnapshot`, `PlaybackCompletionListener.restoreRoutes` and its call sites
+  (completion, `cancel`, the enqueue-failure path). Keeping restoration behind a `replace` mode was
+  rejected
+- **An extension-owned `PlaybackMode` enum** (R3) in `config` beside `ProviderType`: one parser
+  (`fromName`, case-insensitive, exactly `duck-others`/`mix`) for configuration and requests, and an
+  exhaustive `switch` to `RouteJoinMode`; `REPLACE` is not representable. Using `RouteJoinMode`
+  directly, or binding configuration to the enum (Spring's lenient enum conversion also accepts
+  `duck_others`, `DuckOthers`, `duckothers`, and its message lacks the `multiroom-tts:` prefix),
+  were rejected
+- **The request field is a `String`, validated in the service** (R4): `TtsService.announce` resolves
+  it right after the text check, before target lookup, provider resolution, cache lookup and
+  synthesis, so the rejection is this module's `{error, message}` (`Unknown playbackMode '<v>'.
+  Supported: duck-others, mix`) and is counted by `speak()`'s existing rejection path. An enum DTO
+  field or a Bean Validation `@Pattern` was rejected
+- **A host refusal reuses the failed-route cleanup** (R5): `RouteAdmissionException` (admission,
+  before anything is reserved) and a wrapping `RouteException` (after reservation) publish no route
+  event, so core never auto-removes the input. `activate`'s catch counts `playbackFailed()`, calls
+  `completionListener.cancel` and `unregisterInput`, then lets the queue move on — no retry. A
+  refusal logs `TTS_PLAYBACK_REFUSED announcementId= target= output= reason=` at WARN without a
+  stack trace; any other failure keeps the ERROR line with one. Reason and output go to the log
+  only, never a tag; a new `outcome="refused"` value was rejected
+- **Completion timing unchanged** (R6): the host stops a finished route as soon as its lane has
+  drained and starts the ducking release itself, so the next queued announcement still starts after
+  the previous route is destroyed
+- **Configuration nested like `queue` and `cache`** (R7): `PlaybackProperties` (`String defaultMode
+  = "duck-others"`) in `TtsProperties`, resolved once into a `PlaybackMode` that `TtsService` reads
+
 ## Testing strategy
 
 Unit and slice tests only; nothing boots the host.
@@ -434,6 +499,16 @@ Unit and slice tests only; nothing boots the host.
   loop of 10,000 random texts, voices and unknown providers whose meter count must not grow and
   whose tags carry no secret; handler/controller tests for the unreadable body. The cache-hit cost
   is measured by hand against a live host, never asserted as a timing
+- Ducking (006) [Source: .specify/archive/006-announcement-ducking/plan.md -> "Testing"]: `PlaybackModeTest`
+  (accepted and rejected spellings, `joinMode()`); `TtsServiceTest` proves the three-argument
+  `createRoute` for output and group with `verifyNoMoreInteractions(routeService)` (no `stop*`,
+  nothing on completion), request-over-configuration precedence, an unknown mode rejected before the
+  provider and cache are touched, one `CacheKey` for the same text in two modes, the refusal cleanup
+  (`playbackFailed` once, `cancel`, `unregisterInput`, the queue callback) and an enqueue failure
+  that only releases the pin; `PlaybackCompletionListenerTest` (release, no `RouteService`);
+  `TtsPropertiesValidationTest` (default, `mix`/`MIX`, `replace` and a misspelling abort, ignored
+  when disabled); `TtsControllerTest` (`playbackMode` reaches `AnnounceCommand`). `CacheKeyTest` is
+  unchanged: its pinned hashes are the cache half of the compatibility criterion
 - JaCoCo's 80 % floor fails `mvn verify`
 
 ## Build, deploy, verify
@@ -465,7 +540,12 @@ core proves the JAR loads.
    unedited classic entry). 005's are marked done in its tasks: T048 (local-core run with a forced
    timeout and full queue, both switches, and the cache-hit median within 5 % of 0.1.3) and T049
    (the production Pi check, performed by the user)
-   [Source: .specify/archive/005-tts-metrics/tasks.md -> T048, T049]
+   [Source: .specify/archive/005-tts-metrics/tasks.md -> T048, T049]. 006's are marked done too:
+   T035 (local core from the multiroom-ai 023 checkout, `tts` at 0.1.5 not `REJECTED`, the invalid
+   mode and the start-up fault) and T036 (production: music lowered and back, busy-output cache hit,
+   Home Assistant, 50 announcements with no foreign route events, groups, `mix`, stop-all; the route
+   limit only with the user's permission), whose results were recorded in the pull request
+   [Source: .specify/archive/006-announcement-ducking/tasks.md -> T035, T036]
 
 ---
 

@@ -107,6 +107,6 @@ examples for every provider type, and how to trigger an announcement and manage 
 | [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) | Google Cloud service account authentication |
 | [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) | Gemini TTS provider (`google-gemini`) |
 | [.specify/archive/005-tts-metrics/](.specify/archive/005-tts-metrics/) | TTS metrics |
-| [specs/006-announcement-ducking/](specs/006-announcement-ducking/) | Announcements that join the target (`duck-others`, `mix`); its REST contract (v0.1.5) is the current one |
+| [.specify/archive/006-announcement-ducking/](.specify/archive/006-announcement-ducking/) | Announcements that join the target (`duck-others`, `mix`); its REST contract (v0.1.5) is the current one |
 | [specs/007-failed-start-cleanup/](specs/007-failed-start-cleanup/) | A failed start ends once, as a failure |
 | [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |
