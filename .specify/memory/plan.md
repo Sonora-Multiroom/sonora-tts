@@ -436,9 +436,11 @@ operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
   gauge per target key, reading the live queue at scrape time. Queues are never removed from the
   manager's map, so the gauge's reference stays valid
 - **Playback started/failed** (R10): started right after `routeService.createRoute` returns;
-  failed in `activate`'s catch, plus a wrapper around the activator handed to the queue for a
-  `registerInput` or `track` failure before that `try`. The inner catch does not rethrow, so
-  nothing is counted twice
+  failed once, in `abandon`. `activate` tracks the announcement first and runs
+  `inputResolver.register`, `registerInput` and `createRoute` inside one `try`, so a registration
+  failure ends through `abandon` like a failed route (released, logged `TTS_PLAYBACK_FAILED`,
+  queue signalled once); the queue's own catch remains only for a failure inside that cleanup.
+  Tracking before the route exists is safe: no `RouteDestroyedEvent` can name an input without one
 - **Usage measured once, before the call** (R11): `TtsService.synthesize` builds `SynthesisUsage`
   (provider name, `type()`, `billingTier(settings)`, text and style-prompt characters as Unicode
   code points) immediately before `provider.synthesize`, then starts a `Timer.Sample`; outcome and
