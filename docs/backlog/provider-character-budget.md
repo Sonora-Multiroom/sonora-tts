@@ -6,7 +6,7 @@ the measuring half, and moved here on 2026-10-10.
 
 **Origin:** The wish to stay within the Google Cloud free tier, so an operator is never billed by
 accident. Feature 004 deferred a spending cap to this item (`.specify/archive/004-gemini-tts-provider/`).
-Feature 005 measured billable usage with it in mind (`specs/005-tts-metrics/`).
+Feature 005 measured billable usage with it in mind (`.specify/archive/005-tts-metrics/`).
 
 **Depends on:** nothing. 005 (`tts_synthesis_characters`, 0.1.4) already provides the measurement.
 This item does not need service-account auth or the Cloud Monitoring API.

@@ -4,6 +4,120 @@
 
 Newest first.
 
+### 008 Answer A Malformed Target Name With 400, Not 500 — archived 2026-10-15
+**Branch:** `008-malformed-target-name`
+**Spec:** [.specify/archive/008-malformed-target-name/spec.md](../archive/008-malformed-target-name/spec.md)
+**Release:** `multiroom-tts` 0.1.7, still requires `multiroom-api` 0.1.21 (adapts to hub 026)
+
+**What was added:**
+
+- A `targetName` that breaks the hub's ID rule answers 400 `TARGET_NOT_FOUND` ("… (not a valid
+  ID)") in the contract's `ErrorResponse` shape and is counted under `TARGET_NOT_FOUND`, instead of
+  escaping as a 500 counted as `INTERNAL` once hub 026 removed its global exception mapper
+- The ID rule is stated in the `targetName` OpenAPI description
+
+**New Components:**
+
+- `TtsService.parseTargetId` (private); no new class, code, field or metric
+
+No `tasks.md`: the fix skipped plan and tasks; its `plan.md` was written afterwards for archival,
+and what was run is in its `verification.md`.
+
+### 007 An Announcement That Fails To Start Ends Once, As A Failure — archived 2026-10-15
+**Branch:** `007-failed-start-cleanup`
+**Spec:** [.specify/archive/007-failed-start-cleanup/spec.md](../archive/007-failed-start-cleanup/spec.md)
+**Release:** `multiroom-tts` 0.1.6, still requires `multiroom-api` 0.1.21 (no bump; identical on a
+0.1.22 hub)
+
+**What was added:**
+
+- An announcement whose route the hub admitted and then failed to start is reported once, as
+  `TTS_PLAYBACK_FAILED` (ERROR, with the exception), with one failed playback and one queue signal —
+  no longer also as `TTS_PLAYBACK_COMPLETED` with a second queue signal, which hub 024's end-of-route
+  notice for failed starts had caused
+- The extension keeps removing a refused or failed start's input itself (the hub auto-removes only
+  after a route went live); an "is not registered" answer is DEBUG, any other failure stays WARN
+- Refusals and normally completed announcements unchanged; `docs/metrics.md` states that an admitted
+  route that failed to start counts as `failed`
+
+**New Components:**
+
+- No new class. `PlaybackCompletionListener.onRouteDestroyed` ignores a route with no `startedAt`;
+  `cancel` returns whether it removed the entry; `TtsService.abandon` is idempotent and signals the
+  queue only when `cancel` removed it
+
+**Tasks Completed:** 31/31 tasks — T030 closed without a hub backlog item: sonora-multiroom
+`d7f3b46` already documents that `startedAt == null` means the route never went live
+
+### 006 Announcements Over What Is Playing (Ducking) — archived 2026-10-15
+**Branch:** `006-announcement-ducking`
+**Spec:** [.specify/archive/006-announcement-ducking/spec.md](../archive/006-announcement-ducking/spec.md)
+**Release:** `multiroom-tts` 0.1.5, requires `multiroom-api` 0.1.21 (multiroom-ai 023; host first)
+
+**What was added:**
+
+- An announcement joins its target beside whatever plays there instead of stopping the target's
+  routes and recreating them afterwards: in `duck-others` (default; the host lowers the rest and
+  restores it) or `mix` (equal level). Accepting it into the queue changes nothing audible
+- The playback mode per request (`playbackMode`) and by configuration
+  (`multiroom.tts.playback.default-mode`); only `duck-others` and `mix`, case-insensitive; anything
+  else is 400 `INVALID_REQUEST` before any synthesis, or a start-up fault. Not part of the cache key
+- A route the host refuses (route limit) releases everything the announcement reserved, unregisters
+  its input, is logged `TTS_PLAYBACK_REFUSED` at WARN with the host's reason and output, counts as a
+  failed playback and is not retried; the queue moves on
+- Group announcements stay one route; queues stay per target, so overlapping targets may play at
+  once, the newer on top
+- README, `docs/configuration.md`, `docs/metrics.md` and REST contract v0.1.5 updated
+
+**New Components:**
+
+- `PlaybackMode` and `PlaybackProperties` in `multiroom.tts.config`; `playbackMode` on
+  `SpeakRequest`, `AnnounceCommand` and `AnnouncementTask` (which lost its route snapshot)
+- Removed: `TtsService.snapshotAndStopExistingRoutes`, `PlaybackCompletionListener.restoreRoutes` and
+  the listener's `RouteService` dependency
+- Starter parent and `multiroom.require_api_version` raised to 0.1.21
+
+**Superseded:**
+
+- RETIRED: 001/SC-006 (from .specify/archive/001-tts-extension/spec.md) → replaced by 006/SC-002. Reason: the route restore it timed no longer exists (006/FR-002); the host's ducking release, measured by 006/SC-002, took its place
+- RETIRED: entity "Announcement task" — 001's definition (from .specify/archive/001-tts-extension/data-model.md; directory-level ref only) → replaced by 006's definition of "Announcement task". Reason: the task carries the playback mode instead of a route snapshot; the bounded-queue sentence was kept
+
+**Tasks Completed:** 36/36 tasks — including T035 (local-core smoke run against the 023 host) and
+T036 (production verification, results recorded in the pull request)
+
+### 005 TTS Metrics — archived 2026-10-15
+
+**Branch:** `005-tts-metrics`
+**Spec:** [.specify/archive/005-tts-metrics/spec.md](../archive/005-tts-metrics/spec.md)
+**Release:** `multiroom-tts` 0.1.4, still requires `multiroom-api` 0.1.18 (no upstream change)
+
+**What was added:**
+
+- `tts_*` metrics in the host's Micrometer registry, on the host's existing `/actuator/prometheus`:
+  announcements by outcome, error code, rejection reason and (configured) provider; synthesis time
+  per provider as a histogram reaching the longest timeout; characters sent by part and billing
+  tier, and seconds of audio returned; cache hits and misses, size, entries and limit; queue depth
+  per target; playbacks started and failed
+- Billable usage defined and measured once, in `TtsService.synthesize` before the provider call,
+  with the billing tier — groundwork for a later monthly character budget
+- A queue rejection carries `queue_full` or `shutting_down` without changing the caller's
+  `PROVIDER_ERROR`
+- An unreadable speak body now answers the contract's `ErrorResponse` with `INVALID_REQUEST`
+- Bounded tags only; no metrics, and no failure, when the host has no Micrometer; none with
+  `multiroom.tts.enabled=false`
+- Operator guide `docs/metrics.md`, linked from the README and `docs/configuration.md`
+
+**New Components:**
+
+- `multiroom.tts.metrics`: `TtsMetrics`, `MicrometerTtsMetrics`, `NoopTtsMetrics`, `SynthesisUsage`
+- `QueueRejectedException`; `TtsProvider.type()` and `billingTier(settings)`;
+  `ProviderType.configName()`; `ProviderRegistry.isConfigured(name)`;
+  `AnnouncementQueueManager.depth(key)`
+- Dependencies: `micrometer-core` (`provided`), `micrometer-registry-prometheus` (`test`)
+
+**Tasks Completed:** 49/49 tasks — including T048 (local-core run) and T049 (production Pi check,
+performed by the user)
+
 ### 004 Gemini TTS Provider — 2026-09-26 (archived 2026-09-26)
 
 **Branch:** `004-gemini-tts-provider`
