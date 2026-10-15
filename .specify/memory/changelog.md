@@ -4,6 +4,32 @@
 
 Newest first.
 
+### 007 An Announcement That Fails To Start Ends Once, As A Failure — archived 2026-10-15
+**Branch:** `007-failed-start-cleanup`
+**Spec:** [.specify/archive/007-failed-start-cleanup/spec.md](../archive/007-failed-start-cleanup/spec.md)
+**Release:** `multiroom-tts` 0.1.6, still requires `multiroom-api` 0.1.21 (no bump; identical on a
+0.1.22 hub)
+
+**What was added:**
+
+- An announcement whose route the hub admitted and then failed to start is reported once, as
+  `TTS_PLAYBACK_FAILED` (ERROR, with the exception), with one failed playback and one queue signal —
+  no longer also as `TTS_PLAYBACK_COMPLETED` with a second queue signal, which hub 024's end-of-route
+  notice for failed starts had caused
+- The extension keeps removing a refused or failed start's input itself (the hub auto-removes only
+  after a route went live); an "is not registered" answer is DEBUG, any other failure stays WARN
+- Refusals and normally completed announcements unchanged; `docs/metrics.md` states that an admitted
+  route that failed to start counts as `failed`
+
+**New Components:**
+
+- No new class. `PlaybackCompletionListener.onRouteDestroyed` ignores a route with no `startedAt`;
+  `cancel` returns whether it removed the entry; `TtsService.abandon` is idempotent and signals the
+  queue only when `cancel` removed it
+
+**Tasks Completed:** 31/31 tasks — T030 closed without a hub backlog item: sonora-multiroom
+`d7f3b46` already documents that `startedAt == null` means the route never went live
+
 ### 006 Announcements Over What Is Playing (Ducking) — archived 2026-10-15
 **Branch:** `006-announcement-ducking`
 **Spec:** [.specify/archive/006-announcement-ducking/spec.md](../archive/006-announcement-ducking/spec.md)

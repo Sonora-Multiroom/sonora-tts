@@ -10,6 +10,12 @@
 > entities, the lifecycle without snapshot or restore, edge cases, success criteria and AS-010–AS-016.
 > 001/FR-006–FR-009 and the `Speak request` entity annotated; the 001 definition of `Announcement
 > task` and 001/SC-006 superseded (user-confirmed); host coupling raised to API 0.1.21.
+> **Revision**: 2026-10-15 — archived `.specify/archive/007-failed-start-cleanup`: an announcement that fails
+> to start ends once, as `TTS_PLAYBACK_FAILED` — three stories, 007/FR-001–FR-008 (FR-004 folded
+> into 001/FR-008, FR-005 into 006/FR-007), the `Announcement in flight` and `End-of-route notice`
+> entities, the failed-start branch of the lifecycle, edge cases, success criteria and AS-017–AS-021.
+> **Revision**: 2026-10-15 — re-archived `.specify/archive/007-failed-start-cleanup` after T030 closed: AS-018
+> now records that the hub documents `startedAt == null` as "never went live".
 
 **Scope**: one extension for the multiroom audio system — text-to-speech announcements delivered to a
 room or a group of rooms.
@@ -100,6 +106,13 @@ limit) is logged, counted as a failed playback and dropped. Requires multiroom-a
 `playbackMode` and supersedes 004's
 [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-012, FR-013].
 
+**Failed starts end once** in 0.1.6 by `007-failed-start-cleanup` (archived here 2026-10-15): since
+hub 024 (multiroom-api 0.1.22) a route that was admitted and then failed to start announces its end
+before the start failure reaches the extension, which reported it as completed and signalled the
+queue twice. Now such an announcement is reported once, as `TTS_PLAYBACK_FAILED`, with one failed
+playback and one queue signal, identically on a 0.1.21 and a 0.1.22 hub. No API bump, no endpoint,
+field or metric change [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-001, FR-006].
+
 Features in progress live under [specs/](../../specs/) until they are archived here.
 
 ## User stories
@@ -133,10 +146,14 @@ Features in progress live under [specs/](../../specs/) until they are archived h
 | Group announcements over group music | P2 | A group announcement plays in sync on every member over each member's own lowered music; an announcement to one member lowers only that member | 006 |
 | A refused announcement explains itself and leaves the room alone | P2 | An announcement the host refuses (route limit) plays nowhere, changes nothing playing, leaves nothing reserved behind, is logged with the host's reason and counted; the queue moves on | 006 |
 | Choose not to lower the room | P3 | `mix` by configuration or per request keeps the music's level; the request's mode wins; any other mode is a 400 or a start-up fault | 006 |
+| A failed start is reported once, as a failure | P1 | An announcement whose route is admitted and fails to start logs one failure line and no completion, counts one failed and no started playback, and leaves no input registered and no warning | 007 |
+| The queue moves on exactly once | P1 | After a failed start the queue is told once that it ended, the next announcement plays, and nothing is held for the failed one | 007 |
+| Refusals and normal playback are unchanged | P2 | A refused and a normally completed announcement log, count and signal the queue exactly as before 007 | 007 |
 
 Sources: [001](../archive/001-tts-extension/spec.md), [002](../archive/002-google-voice-selection/spec.md),
 [003](../archive/003-google-service-account-auth/spec.md), [004](../archive/004-gemini-tts-provider/spec.md),
-[005](../archive/005-tts-metrics/spec.md), [006](../archive/006-announcement-ducking/spec.md).
+[005](../archive/005-tts-metrics/spec.md), [006](../archive/006-announcement-ducking/spec.md),
+[007](../archive/007-failed-start-cleanup/spec.md).
 
 ### Story details
 
@@ -380,6 +397,78 @@ over music, and confirm the music level does not change.
 4. **Given** a request or configuration names a mode other than *duck-others* or *mix* (for example
    *replace*, or a misspelling), **Then** a request is rejected with `INVALID_REQUEST` before any
    synthesis and a configuration aborts start-up naming the extension and the key.
+
+#### A failed start is reported once, as a failure (Priority: P1)
+
+[Source: .specify/archive/007-failed-start-cleanup/spec.md -> User Story 1]
+
+An operator sends an announcement to a speaker that cannot open its device. The announcement does
+not play. The logs show one failure for it, with the reason, and no "completed" line and no
+unrelated warning. The metrics count one failed playback for it and no started one.
+
+**Why this priority**: The logs and metrics are how the operator learns that announcements are not
+being heard. Reporting a failure as a completion hides exactly the fault they need to see.
+
+**Independent Test**: With a hub whose route start fails after admission (simulated), submit one
+announcement and inspect the log lines and the playback counters for it.
+
+**Acceptance Scenarios**:
+
+1. **Given** the hub admits an announcement's route and the route then fails to start, **When**
+   the extension handles the outcome, **Then** exactly one failure line is logged for that
+   announcement and no `TTS_PLAYBACK_COMPLETED` line is logged for it.
+2. **Given** the same failed start, **When** the playback counters are read, **Then** the failed
+   count has risen by exactly one and the started count has not risen.
+3. **Given** the same failed start, **When** handling completes, **Then** the announcement's
+   temporary input is no longer registered with the hub, and no warning reports that it could not
+   be removed.
+
+#### The queue moves on exactly once (Priority: P1)
+
+[Source: .specify/archive/007-failed-start-cleanup/spec.md -> User Story 2]
+
+After a failed start, the next announcement waiting for the same target plays, and the target's
+queue is told only once that the failed announcement is over.
+
+**Why this priority**: Before 007 the queue tolerated a second signal only by accident. A future
+change to the queue (for example counting what it has played, or chaining work on that signal)
+would turn the second signal into a real fault, such as skipping or double-starting the next
+announcement.
+
+**Independent Test**: Queue two announcements for one target, make the first one's start fail after
+admission, and observe how many times the queue is told the first has ended and that the second
+plays.
+
+**Acceptance Scenarios**:
+
+1. **Given** two announcements queued for one target and the first fails to start after
+   admission, **When** the failure is handled, **Then** the queue is told once that the first has
+   ended, and the second starts.
+2. **Given** an announcement that fails to start after admission, **When** handling completes,
+   **Then** the extension holds nothing more for it: its cached audio is no longer held for
+   playback, its audio is no longer reachable by its address, and any one-off audio file is
+   deleted.
+
+#### Refusals and normal playback are unchanged (Priority: P2)
+
+[Source: .specify/archive/007-failed-start-cleanup/spec.md -> User Story 3]
+
+An announcement the hub refuses, and an announcement that plays to the end, are reported exactly
+as before.
+
+**Why this priority**: The fix touches the paths both of them use; they must not regress.
+
+**Independent Test**: Run a refused announcement and a normally completed one and compare their
+logs, counters and queue signals with the behaviour before 007.
+
+**Acceptance Scenarios**:
+
+1. **Given** the hub refuses an announcement's route, **When** the refusal is handled, **Then**
+   `TTS_PLAYBACK_REFUSED` is logged with the hub's reason, one failed playback is counted, the
+   announcement's input is removed by the extension, and the queue is told once.
+2. **Given** an announcement whose route starts and plays to the end, **When** its route ends,
+   **Then** `TTS_PLAYBACK_STARTED` and `TTS_PLAYBACK_COMPLETED` are logged, one started playback
+   is counted, and the queue is told once.
 
 ## Requirements
 
@@ -713,6 +802,11 @@ the unreadable-body answer noted under 001/FR-032.
   auto-remove it, so then the extension unregisters it (006/FR-007)
   [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-005]
   [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-002]
+  *Amended by 007*: "after its route exists" means after its route **went live** — the hub
+  auto-removes an input only then. After a refusal **or a failed start** the extension removes the
+  input itself, since the hub does not. Finding it already removed (should a future hub remove it)
+  produces no warning and may be noted at debug level; any other failure to remove it is still a
+  warning with its detail [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-004]
 - **001/FR-009** A per-target in-memory queue that serializes **playback only**: validation, cache,
   synthesis and conversion finish before the response, so what is queued already has its file.
   *Amended by 006*: it keeps serializing announcements for one target in arrival order, so two
@@ -735,7 +829,10 @@ the unreadable-body answer noted under 001/FR-032.
   its input, since no route exists to auto-remove it — leaves every other route on the target
   untouched, and moves the target's queue on to the next announcement. A refused announcement is
   never retried: announcements are time-sensitive, and a late one is worse than none
-  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-007]
+  [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-007]. *Since 007 unchanged*: a
+  refusal logs `TTS_PLAYBACK_REFUSED` with the hub's reason and output, counts one failed playback,
+  has its input removed by the extension and tells the queue once
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-005]
 - **006/FR-008** A host refusal is logged with the announcement id, the target, and the host's
   reason and offending output when the host gives them, and is counted as a failed playback in the
   existing metrics without adding a tag key to any existing metric and without any caller text as a
@@ -752,6 +849,27 @@ the unreadable-body answer noted under 001/FR-032.
   behaviour, the playback-mode field and setting, the host-side ducking settings that govern the
   level and fade, and the deployment order (host first)
   [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-014]
+- **007/FR-001** Every announcement taken off a queue ends exactly once: its resources released
+  once, its queue told once, and its outcome counted once — whichever of the hub's end-of-route
+  notice and the start failure reaches the extension first
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-001]
+- **007/FR-002** An announcement whose route was admitted but failed to start is reported as a
+  failure: one failure log line naming the announcement and its target, one failed playback
+  counted, and no completed log line [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-002]
+- **007/FR-003** An announcement whose route started is reported as completed when its route ends,
+  including when the route ends before the start call has returned to the extension
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-003]
+- **007/FR-006** The behaviour is the same on a hub that usually sends no end-of-route notice for a
+  route that failed to start (multiroom-api 0.1.21) and on one that always does (0.1.22 and later).
+  The extension's minimum required API version is not raised for this
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-006]
+- **007/FR-007** The descriptions in the code of the start-failure cleanup and of the cancellation
+  of a tracked announcement describe both orders of events (notice first, or no notice at all),
+  replacing the statements that a failed route never produces a notice
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-007]
+- **007/FR-008** The metrics documentation states that an announcement that was admitted but failed
+  to start counts as `failed`, never as `started`
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-008]
 - **001/FR-024** Shutdown lets the current announcement finish and discards the queue.
   `enabled=false` is a start-up state, never a runtime transition
 
@@ -839,6 +957,18 @@ the unreadable-body answer noted under 001/FR-032.
   (`multiroom.tts.playback.default-mode`, `duck-others`), validated at start-up and skipped when
   `multiroom.tts.enabled=false` [Source: .specify/archive/006-announcement-ducking/spec.md -> "Playback settings"]
   [Source: .specify/archive/006-announcement-ducking/data-model.md -> "PlaybackProperties (new, `multiroom.tts.playback`)"]
+- **Announcement in flight** *(007)* — an announcement taken off its target's queue whose end has
+  not yet been handled. It ends exactly once, with one outcome: completed (it started) or failed (it
+  was refused, or it was admitted and did not start). Held in the completion listener's in-flight
+  map by its unique input id together with the queue's completion callback; removing that entry is
+  the single point that decides who ends the announcement
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "Announcement in flight"]
+  [Source: .specify/archive/007-failed-start-cleanup/data-model.md -> "Announcement in flight"]
+- **End-of-route notice** *(007)* — the hub's announcement that a route has ended
+  (`RouteDestroyedEvent`). Since hub 024 it is sent for every admitted route, whether or not it
+  started; a route that never went live carries no start time
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "End-of-route notice"]
+  [Source: .specify/archive/007-failed-start-cleanup/research.md -> R3]
 - **Announcement count** *(005)* — how many announcement requests arrived, by outcome, error code,
   rejection reason and provider [Source: .specify/archive/005-tts-metrics/spec.md -> "Announcement count"]
 - **Synthesis timing** *(005)* — the duration and number of provider syntheses, with a bucketed
@@ -877,7 +1007,10 @@ RECEIVED → VALIDATED            text, then playbackMode (006), target, provide
               mode) — core resolves tts:// to the WAV's file:// URI. No snapshot, nothing stopped
               (since 006)
               host refusal (RouteAdmissionException) → WARN TTS_PLAYBACK_REFUSED, playback failed;
-              other failure → ERROR; either way: unpin, release, delete, unregisterInput → next
+              admitted but failed to start → ERROR TTS_PLAYBACK_FAILED (since 007); on hub
+              0.1.22+ its end-of-route notice (no startedAt) arrives first and is left to this
+              path; either way: playback failed counted once, unpin, release, delete,
+              unregisterInput (an already-removed input is DEBUG) → next, signalled once
   → PLAYING   others lowered by the host under duck-others … RouteDestroyedEvent
   → RELEASING unpin, release the resolver entry, drop any temp file → next in queue
               (input removed by core's auto-remove; other routes restored by the host)
@@ -887,6 +1020,12 @@ RECEIVED → VALIDATED            text, then playbackMode (006), target, provide
 Until 006 the ROUTING step snapshotted and stopped the target's routes, and a RESTORING step
 recreated them after `RouteDestroyedEvent`; both are gone
 [Source: .specify/archive/006-announcement-ducking/data-model.md -> "Announcement lifecycle"].
+
+Since 007 exactly one of the completion listener (route went live) and the failure path (refused
+or failed start) removes the in-flight entry, and only the remover releases and runs the queue
+callback; the failure path counts the failure unconditionally, so started plus failed equals the
+announcements taken off queues
+[Source: .specify/archive/007-failed-start-cleanup/data-model.md -> "States and transitions"].
 
 Since 005 the flow is unchanged but observed: every answered request is counted, the cache lookup
 is counted hit or miss, a synthesis is timed and its characters measured once immediately before
@@ -1004,6 +1143,23 @@ the provider call (conversion outside the timing), and the playback start is cou
 - *(006)* A route that was waiting to be restored at upgrade time cannot exist — restoration state
   was in memory only and is gone after the restart the upgrade requires
   [Source: .specify/archive/006-announcement-ducking/spec.md -> "A route that was waiting to be restored at upgrade time"]
+- *(007)* A hub older than 024 usually sends no end-of-route notice for a route that failed to start
+  (it may for a route stopped while starting). The extension still cleans up once, reports one
+  failure and removes the input itself
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "A hub older than 024"]
+- *(007)* A very short announcement finishes on the hub's own thread before the start call returns
+  to the extension: if the hub had already reported it started, it played and is reported as
+  completed, not as a failure; if its audio ran out before the hub reported it started, the hub
+  itself reports the start as failed, and so does the extension
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "A very short announcement finishes on the hub's own thread"]
+- *(007)* Removing the input fails for a reason other than "already removed" (an unexpected hub
+  error): still logged as a warning with its detail
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "Removing the input fails for a reason other than"]
+- *(007)* The hub sends the end-of-route notice twice for one route: the announcement is still
+  handled once [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "The hub sends the end-of-route notice twice"]
+- *(007)* A failure before the route step (registering the input or tracking the announcement
+  fails): counted once as a failed playback, as before 007
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "A failure before the route step"]
 
 ## Success criteria
 
@@ -1062,6 +1218,10 @@ repository boots the host.
 | 006/SC-005 refusal leaves nothing | 0 registered inputs, pinned entries, temp files or resolver entries left; nothing audible changed | Unit-tested (`TtsServiceTest`, `PlaybackCompletionListenerTest`); quickstart §7 only with the user's permission |
 | 006/SC-006 compatibility | 100 % of existing request bodies accepted unchanged; every pre-upgrade cache entry still a hit | `CacheKeyTest` pinned hashes unchanged; controller tests |
 | 006/SC-007 Home Assistant | shows the room's music as its source during and after an announcement, no flicker | Production check T036 |
+| 007/SC-001 failed start logged once | 0 completion lines and 0 input-removal warnings, exactly 1 failure line, for a route that fails after admission | Unit-tested only; a failed start cannot be provoked safely on production |
+| 007/SC-002 one end per announcement | in each of four cases (completed, refused, admitted-but-failed on a current hub, failed on an older hub) the queue is told once and one outcome is counted | Unit-tested (`TtsServiceTest`, `PlaybackCompletionListenerTest`) |
+| 007/SC-003 counters add up | started + failed = announcements taken off their queues | Unit-tested; on production after the 0.1.6 deploy one normal announcement gave `started` 1 and no `failed` series |
+| 007/SC-004 no regression | refused and completed announcements produce the same lines, counts and queue signals as before 007 | Unit-tested; one normal announcement on production logged STARTED and COMPLETED once each |
 
 Sources for the 005 rows: [.specify/archive/005-tts-metrics/spec.md -> SC-001–SC-007], status from
 [.specify/archive/005-tts-metrics/tasks.md -> T041, T047, T048].
@@ -1069,6 +1229,8 @@ Sources for the 006 rows: [.specify/archive/006-announcement-ducking/spec.md -> 
 [.specify/archive/006-announcement-ducking/tasks.md -> T035, T036] and
 [.specify/archive/006-announcement-ducking/plan.md -> "Testing"]. T036 is marked done; its results were
 recorded in the pull request, not in the feature's artifacts.
+Sources for the 007 rows: [.specify/archive/007-failed-start-cleanup/spec.md -> SC-001–SC-004], status from
+[.specify/archive/007-failed-start-cleanup/verification.md].
 
 ## Assumptions
 
@@ -1137,6 +1299,27 @@ recorded in the pull request, not in the feature's artifacts.
 - **AS-016** Audible behaviour is verified on the production device after deployment, as for
   earlier playback-affecting changes; the unit tests cover the routing calls and cleanup
   [Source: .specify/archive/006-announcement-ducking/spec.md -> "Audible behaviour is verified on the production device"]
+- **AS-017** The hub's end-of-route notice for a route that failed to start is delivered before the
+  start failure reaches the extension, though possibly on another thread (the hub's event dispatch
+  may be drained by another thread while the starting caller waits). The extension is still correct
+  if this ordering changes or the notice never arrives
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "The hub's end-of-route notice for a route that failed to start"]
+- **AS-018** A route that never started is told from one that finished by the route's missing start
+  time in the notice. When 007 was specified the hub did not document that meaning; it now does
+  (sonora-multiroom `d7f3b46`, on `Route.startedAt`, `RouteDestroyedEvent` and
+  `RouteService.createRoute`, pinned by hub tests), so no hub backlog item was filed
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "How the extension tells a route that never started"]
+  [Source: .specify/archive/007-failed-start-cleanup/tasks.md -> T030]
+- **AS-019** `tts_playbacks_total` keeps its `outcome` values (`started`, `failed`); no tag value or
+  metric is added. A failed start was already counted as `failed`; 007 only removed the completion
+  reported alongside it
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "`tts_playbacks_total` keeps its existing `outcome` values"]
+- **AS-020** A route that fails after admission cannot be produced safely on the production
+  Raspberry Pi on demand, so failed starts are verified by tests with a simulated hub plus the usual
+  deploy-and-inspect smoke run
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "Verifying on the production Raspberry Pi requires"]
+- **AS-021** The backlog item `failed-start-double-cleanup` is deleted once 007 ships
+  [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "The backlog item is deleted once this feature ships."]
 
 ## Host coupling
 

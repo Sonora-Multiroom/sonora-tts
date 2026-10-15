@@ -12,6 +12,13 @@
 > keys; `playbackMode` on the HTTP surface and 006's contract v0.1.5; refusals under
 > `tts_playbacks_total{outcome="failed"}`; the completion decision rewritten (no restore) and 006's
 > design decisions added; testing notes; T035/T036 recorded.
+> **Revision**: 2026-10-15 — archived `.specify/archive/007-failed-start-cleanup`: the completion and refusal
+> decisions corrected for hub 0.1.22 (a failed start publishes its end first; the listener leaves a
+> never-started route to the failure path; `TTS_PLAYBACK_FAILED` replaces the old ERROR line;
+> `abandon` idempotent; an already-removed input is DEBUG); 007's design decisions, testing notes and
+> verification (T026–T028) added. No dependency, configuration or HTTP change.
+> **Revision**: 2026-10-15 — re-archived `.specify/archive/007-failed-start-cleanup` after T030 closed: the
+> `startedAt` decision now records that the hub documents its meaning (`d7f3b46`).
 
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
@@ -19,8 +26,9 @@ planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension
 [Source: .specify/archive/002-google-voice-selection/plan.md],
 `003-google-service-account-auth` [Source: .specify/archive/003-google-service-account-auth/plan.md]
 `004-gemini-tts-provider` [Source: .specify/archive/004-gemini-tts-provider/plan.md],
-`005-tts-metrics` [Source: .specify/archive/005-tts-metrics/plan.md] and
-`006-announcement-ducking` [Source: .specify/archive/006-announcement-ducking/plan.md].
+`005-tts-metrics` [Source: .specify/archive/005-tts-metrics/plan.md],
+`006-announcement-ducking` [Source: .specify/archive/006-announcement-ducking/plan.md] and
+`007-failed-start-cleanup` [Source: .specify/archive/007-failed-start-cleanup/plan.md].
 
 ## Shape
 
@@ -240,7 +248,9 @@ Tag values: `provider` is a configured name or `unknown`; `type` the configurati
 `INTERNAL` (HTTP 500 with no code) or `none`; `reason` `queue_full`, `shutting_down` or `none`;
 `tier` a `GoogleEngine` canonical name or `other` (`google-cloud`), the configured model
 (`google-gemini`), or `none`. Since 006, `tts_playbacks_total{outcome="failed"}` also counts
-announcements the host refused (logged `TTS_PLAYBACK_REFUSED`), and an invalid `playbackMode` is
+announcements the host refused (logged `TTS_PLAYBACK_REFUSED`), and since 007 an admitted route
+that failed to start is `failed`, never `started`, counted once
+[Source: .specify/archive/007-failed-start-cleanup/contracts/observability.md], and an invalid `playbackMode` is
 `tts_announcements_total{outcome="rejected", error="INVALID_REQUEST"}`; no name, tag key or value
 set changed [Source: .specify/archive/006-announcement-ducking/plan.md -> "Metrics"]. Contract (v0.1.4):
 [.specify/archive/005-tts-metrics/contracts/metrics.md](../archive/005-tts-metrics/contracts/metrics.md);
@@ -263,7 +273,10 @@ operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
   id, unpins, releases the resolver entry and drops any temp file. It does not unregister the
   input — `autoRemove` already has. *Since 006* it restores nothing and holds no `RouteService`:
   the snapshot and restore it did until then are gone
-  [Source: .specify/archive/006-announcement-ducking/plan.md -> "Completion (`PlaybackCompletionListener`)"]
+  [Source: .specify/archive/006-announcement-ducking/plan.md -> "Completion (`PlaybackCompletionListener`)"].
+  *Since 007* it ignores a destroyed route that never went live (`startedAt == null`), leaving it
+  tracked for the failure path
+  [Source: .specify/archive/007-failed-start-cleanup/plan.md -> "`PlaybackCompletionListener.onRouteDestroyed`"]
 - **The queue guards the output, not the provider.** Synthesis runs in the request thread so every
   provider failure is reported synchronously; the queue orders only `registerInput` + `createRoute`
 - **One error mapping.** `TtsExceptionHandler` holds the only `TtsErrorCode` → status table and is
@@ -452,17 +465,48 @@ operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
   Supported: duck-others, mix`) and is counted by `speak()`'s existing rejection path. An enum DTO
   field or a Bean Validation `@Pattern` was rejected
 - **A host refusal reuses the failed-route cleanup** (R5): `RouteAdmissionException` (admission,
-  before anything is reserved) and a wrapping `RouteException` (after reservation) publish no route
-  event, so core never auto-removes the input. `activate`'s catch counts `playbackFailed()`, calls
-  `completionListener.cancel` and `unregisterInput`, then lets the queue move on — no retry. A
+  before anything is reserved) and a wrapping `RouteException` (after reservation) never make a
+  route go live, so core never auto-removes the input. `activate`'s catch counts `playbackFailed()`,
+  calls `completionListener.cancel` and `unregisterInput`, then lets the queue move on — no retry. A
   refusal logs `TTS_PLAYBACK_REFUSED announcementId= target= output= reason=` at WARN without a
-  stack trace; any other failure keeps the ERROR line with one. Reason and output go to the log
-  only, never a tag; a new `outcome="refused"` value was rejected
+  stack trace; any other failure logs `TTS_PLAYBACK_FAILED announcementId= target=` at ERROR with
+  one (since 007; before it, `Failed to create route for announcement …`). Reason and output go to
+  the log only, never a tag; a new `outcome="refused"` value was rejected
+  [Source: .specify/archive/007-failed-start-cleanup/research.md -> R5]
 - **Completion timing unchanged** (R6): the host stops a finished route as soon as its lane has
   drained and starts the ducking release itself, so the next queued announcement still starts after
   the previous route is destroyed
 - **Configuration nested like `queue` and `cache`** (R7): `PlaybackProperties` (`String defaultMode
   = "duck-others"`) in `TtsProperties`, resolved once into a `PlaybackMode` that `TtsService` reads
+
+[Source: .specify/archive/007-failed-start-cleanup/plan.md, research.md]
+
+- **A failed start publishes its end first on hub 0.1.22+** (R1): the hub reserves the route (no
+  `startedAt`), and a failure while opening input, outputs or pipeline queues one
+  `RouteDestroyedEvent` that is drained — possibly on another thread — before `createRoute` throws.
+  On 0.1.21 that path publishes none; a route stopped while starting can on either
+- **The hub never removes a failed start's input** (R2): `AutoRemoveInputListener` removes an
+  `autoRemove` input only after a `RouteCreatedEvent`, published only when a route goes live. The
+  failure path therefore keeps owning `unregisterInput`; skipping it in `abandon` (the backlog
+  item's proposal) would leak the input for the life of the process
+- **`startedAt == null` means "never went live"** (R3): set only by `Route.withStarted` from
+  `RouteSession.markLive` and kept by a transfer, on 0.1.21 as on 0.1.22, so
+  `require_api_version` stays 0.1.21. A short announcement that went live and ended before
+  `createRoute` returned carries a start time and completes normally; an extension-held "starting"
+  mark was rejected because it misreports that race. The meaning was undocumented upstream when
+  007 was planned; sonora-multiroom `d7f3b46` now documents it in `multiroom-api` and pins it in hub
+  tests. Even if a hub broke it, only the log line would regress
+  [Source: .specify/archive/007-failed-start-cleanup/tasks.md -> T030]
+- **One remover** (R4): `PlaybackCompletionListener.cancel` returns whether it removed the
+  in-flight entry; `abandon` always counts one failed playback and always removes the input, but
+  runs the queue callback only when `cancel` removed the entry (else DEBUG "already handled"). The
+  listener never counts, so started + failed stays equal to the announcements taken off queues.
+  `onRouteDestroyed` reads the map with a single `get`, avoiding a check-then-act race found in
+  review
+- **Removal answers** (R5): an `IllegalArgumentException` from `unregisterInput` ("is not
+  registered") is DEBUG — the hub's only other one there refuses a static input, which a
+  `tts-<uuid>` input never is; any other `RuntimeException` stays WARN with the stack trace. A
+  never-started route is logged by the listener at DEBUG only
 
 ## Testing strategy
 
@@ -509,6 +553,13 @@ Unit and slice tests only; nothing boots the host.
   `TtsPropertiesValidationTest` (default, `mix`/`MIX`, `replace` and a misspelling abort, ignored
   when disabled); `TtsControllerTest` (`playbackMode` reaches `AnnounceCommand`). `CacheKeyTest` is
   unchanged: its pinned hashes are the cache half of the compatibility criterion
+- Failed starts (007) [Source: .specify/archive/007-failed-start-cleanup/research.md -> R6]: unit tests only.
+  `TtsServiceTest` simulates the 0.1.22 ordering with a `createRoute` stub that calls the real
+  listener's `onRouteDestroyed` with a route without `startedAt` before throwing (queue told once,
+  one failure counted, input removed once), the 0.1.21 ordering (no event), an unchanged refusal and
+  `abandon` after an already-handled task; `PlaybackCompletionListenerTest`'s `routeTo` helper sets
+  `startedAt`, a never-started route stays tracked, `cancel` reports its removal, and an
+  already-removed input logs no WARN
 - JaCoCo's 80 % floor fails `mvn verify`
 
 ## Build, deploy, verify
@@ -545,7 +596,11 @@ core proves the JAR loads.
    mode and the start-up fault) and T036 (production: music lowered and back, busy-output cache hit,
    Home Assistant, 50 announcements with no foreign route events, groups, `mix`, stop-all; the route
    limit only with the user's permission), whose results were recorded in the pull request
-   [Source: .specify/archive/006-announcement-ducking/tasks.md -> T035, T036]
+   [Source: .specify/archive/006-announcement-ducking/tasks.md -> T035, T036]. 007's are recorded:
+   `mvn clean verify` green (688 tests), a local smoke run on a 0.1.22 core (`tts` 0.1.6 `ACTIVE`),
+   and a production check with one normal announcement (STARTED and COMPLETED once, `started` 1, no
+   `failed`); a failed start cannot be provoked safely on production and is covered by unit tests
+   only [Source: .specify/archive/007-failed-start-cleanup/verification.md]
 
 ---
 
