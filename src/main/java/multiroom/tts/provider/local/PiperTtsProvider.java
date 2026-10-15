@@ -58,8 +58,11 @@ public class PiperTtsProvider implements TtsProvider {
 
     @Override
     public SynthesisResult synthesize(SynthesisRequest request) {
+        // Without "--output-file -" piper1-gpl does not write to stdout: it plays the audio through
+        // ffplay when that is installed, and otherwise writes output.wav to the working directory.
         ProcessBuilder processBuilder = new ProcessBuilder(
-                pythonExecutable, "-m", "piper", "--model", modelPath, "--config", configPath);
+                pythonExecutable, "-m", "piper", "--model", modelPath, "--config", configPath,
+                "--output-file", "-");
         Process process;
         try {
             process = processBuilder.start();
