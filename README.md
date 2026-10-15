@@ -3,110 +3,42 @@
 Text-to-speech announcements for the [multiroom audio system](https://github.com/tiger-seo/multiroom-ai).
 
 Send a line of text and a target room; the extension synthesizes it through a configured TTS
-provider, caches the audio, and plays it on that output or output group.
+provider, caches the audio, and plays it on that output or output group over whatever is already
+playing there.
 
 ```http
 POST /api/tts/speak
 { "text": "Dinner is ready", "targetName": "kitchen", "targetType": "SINGLE_OUTPUT" }
 ```
 
-## What it is
+It is a drop-in extension JAR for `multiroom-core`: it contributes beans into the host's Spring
+context and ships no web server or Spring of its own.
 
-A single **drop-in extension JAR** for `multiroom-core`. It is discovered before the host starts,
-contributes into the host's Spring context by auto-configuration, and obtains core services by
-ordinary dependency injection. It runs no web server of its own and ships no copy of Spring.
-
-- Multiple named providers (cloud or local), one of them the default; a request may override the
-  provider, voice and language; for Google Cloud also the engine, pitch and speaking rate; and for
-  Google Gemini also the speaking rate and a `stylePrompt`, which only `google-gemini` accepts
-- Google Cloud voices by full name (`uk-UA-Chirp3-HD-Charon`) or by engine + language + short
-  name (`charon`), checked against Google's published voice list, which
-  `GET /api/tts/providers/{name}/voices` also exposes; for a `google-gemini` entry it lists the
-  Gemini voices with their gender
-- Google Cloud authentication by API key or by a service account's JSON key, exchanged for
-  short-lived access tokens with no Google library bundled
-- Google Gemini voices (`Kore`, `Charon`, …) through a separate `google-gemini` provider type, with
-  a per-entry and per-request **style prompt** to steer delivery. Service-account authentication
-  only; billed per token with no free tier, so it's never a default an operator falls into by
-  accident
-- Disk cache keyed by text + provider/model + voice/language (+ style prompt, when one is in
-  effect) + audio format, surviving restarts, LRU-evicted at a configurable size
-- Playback through an ephemeral registered input that **joins** its target: whatever is already
-  playing there keeps playing, lowered under the announcement (`duck-others`, the default) or left
-  as it is (`mix`). The host lowers and restores the level; nothing is stopped or recreated. A
-  request may choose with `playbackMode`, and `multiroom.tts.playback.default-mode` sets the default
-- `tts_*` metrics in the host's `/actuator/prometheus`: announcements, synthesis time and billable
-  characters per provider, cache hits, queue depth and playbacks
-
-Status: **implemented, `mvn verify` green**, at version 0.1.7 with features 001 to 008. See the
-master [spec](.specify/memory/spec.md) for what it does today (005 to 008 are not merged into it
-yet; their specs are under [specs/](specs/)), [plan](.specify/memory/plan.md) for
-how it is built, and [changelog](.specify/memory/changelog.md) for each feature and its open tasks
-(001's timings and Pi end-to-end run still need real audio hardware).
-
-## Requirements
-
-- Java 17
-- Maven
-- A local checkout of `multiroom-ai`, with its API installed into `~/.m2`:
-  ```powershell
-  cd D:\projects-sonora\sonora-multiroom
-  mvn -pl multiroom-api,multiroom-extension-starter -am install
-  ```
-  Nothing is published to a remote repository — the local Maven repository is the distribution
-  channel. This repository currently builds against **multiroom-api 0.1.21**.
+- Providers: OpenAI, Google Cloud, Google Gemini, Piper and any local HTTP engine; several named
+  entries, one of them the default
+- On-disk LRU cache that survives restarts
+- Announcements duck the music under them (`duck-others`) or play alongside it (`mix`)
+- `tts_*` metrics in the host's `/actuator/prometheus`
 
 ## Build and deploy
+
+Needs Java 17, Maven, and `multiroom-api` installed into `~/.m2` from a local `multiroom-ai`
+checkout (`mvn -pl multiroom-api,multiroom-extension-starter -am install`).
 
 ```powershell
 mvn verify                  # build and test
 mvn deploy -Plocal          # copy the JAR into the local multiroom-ai checkout's extensions/
-mvn deploy                  # PRODUCTION: scp to multiroom.lan:/home/tiger/extensions
+mvn deploy                  # PRODUCTION: scp to multiroom.lan
 ```
 
-A plain `mvn deploy` uploads to the production host, because the inherited `remote` profile is
-active by default. Use `-Plocal` while developing.
-
-After deploying, confirm the host accepted the JAR:
-
-```
-GET /actuator/extensions      →  tts, with the expected version, not REJECTED
-```
-
-That check is the second half of the merge gate: a green local build proves the module compiles,
-not that it loads.
-
-**Deployment order.** Version 0.1.7 needs `multiroom-api` 0.1.21 (`Require-API-Version:
-[0.1.21,0.2.0)`) and runs unchanged on 0.1.22: deploy a host built with it first, then this JAR. A level and fade for the
-lowered music are the host's `audio.mixing.ducking.*` settings, not this extension's.
-
-## Configuration
-
-Lives in the **host's** configuration file (`multiroom.yml`), under `multiroom.tts`. Provider
-credentials belong there — API keys via environment variables, a Google service account key as a
-file on the host — and never in this repository.
-
-`multiroom.tts.enabled=false` disables the extension without removing the JAR.
-
-See **[docs/configuration.md](docs/configuration.md)** for the full field reference, worked
-examples for every provider type, and how to trigger an announcement and manage the cache.
+After deploying, `GET /actuator/extensions` should list `tts` with the expected version, not
+`REJECTED`.
 
 ## Documentation
 
 | Document | What it covers |
 |---|---|
-| [docs/configuration.md](docs/configuration.md) | How to configure providers, cache and queue; triggering announcements |
-| [docs/metrics.md](docs/metrics.md) | The metrics in the host's `/actuator/prometheus`: what each counts, billable usage, example queries |
-| [docs/known-issues.md](docs/known-issues.md) | Behaviour accepted for now: symptom, what to look for, possible fix |
-| [docs/google-cloud-tts-setup.md](docs/google-cloud-tts-setup.md) | Setting up Google Cloud: billing, the API, an API key or a service account key, and Gemini voices (`google-gemini`) |
-| [AGENTS.md](AGENTS.md) | How to work in this repository, and the rules across the repo boundary |
-| [.specify/memory/constitution.md](.specify/memory/constitution.md) | Engineering principles, the merge gate, the extension boundary |
-| [.specify/memory/spec.md](.specify/memory/spec.md), [plan.md](.specify/memory/plan.md), [changelog.md](.specify/memory/changelog.md) | Master spec and plan, merged from every archived feature, and the feature log |
-| [.specify/archive/001-tts-extension/](.specify/archive/001-tts-extension/) | The feature: spec, plan, tasks, contracts |
-| [.specify/archive/002-google-voice-selection/](.specify/archive/002-google-voice-selection/) | Google Cloud voice selection |
-| [.specify/archive/003-google-service-account-auth/](.specify/archive/003-google-service-account-auth/) | Google Cloud service account authentication |
-| [.specify/archive/004-gemini-tts-provider/](.specify/archive/004-gemini-tts-provider/) | Gemini TTS provider (`google-gemini`) |
-| [.specify/archive/005-tts-metrics/](.specify/archive/005-tts-metrics/) | TTS metrics |
-| [.specify/archive/006-announcement-ducking/](.specify/archive/006-announcement-ducking/) | Announcements that join the target (`duck-others`, `mix`); its REST contract (v0.1.5) is the current one |
-| [.specify/archive/007-failed-start-cleanup/](.specify/archive/007-failed-start-cleanup/) | A failed start ends once, as a failure |
-| [docs/upstream/](docs/upstream/) | Read-only snapshots of the host's extension guides |
+| [docs/configuration.md](docs/configuration.md) | Providers, cache, queue and playback settings; triggering announcements |
+| [docs/google-cloud-tts-setup.md](docs/google-cloud-tts-setup.md) | Setting up Google Cloud and Gemini voices |
+| [docs/metrics.md](docs/metrics.md) | The `tts_*` metrics and example queries |
+| [docs/known-issues.md](docs/known-issues.md) | Behaviour accepted for now |
