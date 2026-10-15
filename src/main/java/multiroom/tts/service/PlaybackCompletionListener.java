@@ -83,8 +83,8 @@ public class PlaybackCompletionListener {
     }
 
     /**
-     * Cleans up a tracked announcement whose route never went live: a {@code createRoute} refusal or
-     * failure right after {@link #track}. Runs the identical cleanup {@link #onRouteDestroyed} would
+     * Cleans up a tracked announcement whose route never went live: a failure to register its input,
+     * or a {@code createRoute} refusal or failure, after {@link #track}. Runs the identical cleanup {@link #onRouteDestroyed} would
      * (unpinning the cache entry, releasing the resolver mapping, deleting any temp file).
      *
      * <p>A refused route is never admitted and publishes no event. On hub 0.1.22 and later an

@@ -1344,6 +1344,58 @@ class TtsServiceTest {
         verify(deviceRegistryService, times(1)).unregisterInput(any(InputId.class));
     }
 
+    @Test
+    void anInputThatCannotBeRegisteredReleasesEverythingAndMovesTheQueueOnOnce() {
+        when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+        useRealListener();
+        doThrow(new IllegalStateException("registry down")).doReturn(null)
+                .when(deviceRegistryService).registerInput(any());
+        doThrow(new IllegalArgumentException("Input 'tts-x' is not registered"))
+                .when(deviceRegistryService).unregisterInput(any(InputId.class));
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+                .thenReturn(aRoute("living-room"));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events = captureLog(() -> {
+            service.speak(speakTo("living-room", null));
+            service.speak(speakTo("living-room", null));
+            verify(metrics, timeout(ASYNC_TIMEOUT_MS)).playbackStarted();
+        }, TtsService.class, PlaybackCompletionListener.class);
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> failed =
+                events.stream().filter(e -> startsWith(e, "TTS_PLAYBACK_FAILED")).toList();
+        assertThat(failed).hasSize(1);
+        assertThat(failed.get(0).getThrowableProxy()).isNotNull();
+        assertThat(events).noneMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN);
+        verify(routeService, times(1)).createRoute(any(InputId.class), eq(OutputId.of("living-room")),
+                any(RouteJoinMode.class));
+        verify(metrics, times(1)).playbackFailed();
+        verify(audioCache, times(1)).unpin(any(CacheKey.class));
+        verify(inputResolver, times(1)).release(any(UUID.class));
+        verify(deviceRegistryService, times(1)).unregisterInput(any(InputId.class));
+    }
+
+    @Test
+    void anInputThatCannotBeRegisteredDeletesTheTemporaryFile() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.empty());
+        when(openaiProvider.synthesize(any())).thenReturn(new SynthesisResult(fakeProviderWav(), 24000, 1, 16));
+        when(audioCache.put(any(), any())).thenThrow(new CacheWriteException("disk full", new java.io.IOException()));
+        useRealListener();
+        List<java.nio.file.Path> spilled = new java.util.concurrent.CopyOnWriteArrayList<>();
+        doAnswer(inv -> spilled.add(inv.getArgument(1))).when(inputResolver).register(any(UUID.class), any());
+        doThrow(new IllegalStateException("registry down")).when(deviceRegistryService).registerInput(any());
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        service.speak(speakTo("living-room", null));
+
+        verify(inputResolver, timeout(ASYNC_TIMEOUT_MS)).release(any(UUID.class));
+        assertThat(spilled).hasSize(1);
+        assertThat(spilled.get(0)).doesNotExist();
+        verify(audioCache, never()).unpin(any(CacheKey.class));
+        verify(metrics, times(1)).playbackFailed();
+        verify(routeService, never()).createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class));
+    }
+
     private static AnnounceCommand speakWithMode(String mode) {
         return new AnnounceCommand("Dinner is ready", "living-room", TargetType.SINGLE_OUTPUT, null,
                 null, null, null, null, null, null, mode);
