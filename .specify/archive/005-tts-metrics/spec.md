@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-26
 
-**Status**: Draft
+**Status**: Completed
 
 **Depends on**: `001-tts-extension` through `004-gemini-tts-provider`. This feature only
 observes. Announcements, providers, the cache, the queue and the REST contract behave exactly as
@@ -48,7 +48,7 @@ existing one changes.
 
 ### Groundwork for a character budget
 
-[docs/future/google-cloud-free-tier-tracking.md](../../docs/future/google-cloud-free-tier-tracking.md)
+[docs/future/google-cloud-free-tier-tracking.md](../../../docs/future/google-cloud-free-tier-tracking.md)
 (a local working note, excluded from git, so the link resolves only in the author's checkout)
 describes a later feature: a monthly character budget per provider entry, so an operator can stop
 serving TTS (or fall back to another provider) before Google's free tier runs out or an OpenAI bill

@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-09
 
-**Status**: Draft
+**Status**: Completed
 
 **Input**: User description: the backlog item
 [docs/backlog/failed-start-double-cleanup.md](../../docs/backlog/failed-start-double-cleanup.md),
