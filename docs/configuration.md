@@ -65,13 +65,15 @@ instead of talking to a running server:
         type: PIPER
         python-executable: python3        # must have `pip install piper-tts` done; Windows: python
         model-path: /opt/piper/models/en_US-ryan-medium.onnx
-        timeout-seconds: 10
+        timeout-seconds: 30               # a cold start takes ~16 s on a Raspberry Pi
 ```
 
 This is one less always-on service to run (no systemd unit sitting on port 5000, no model held
-resident in RAM between announcements), but it **reloads the model from disk on every request** —
-real added latency on a Pi that eats into SC-001's 5-second budget on cache misses. Prefer the
-HTTP server unless avoiding a second daemon matters more than that.
+resident in RAM between announcements: the HTTP server holds ~175 MB), but it **starts Python and
+reloads the model on every cache miss**. On a Raspberry Pi with `en_US-amy-low` that took 15.6 s
+(2026-10-15), so a miss blocks `POST /api/tts/speak` that long and needs a `timeout-seconds` well
+above the default 10 (a start-up `WARN` notes it). Cache hits are unaffected. It suits a backup
+provider that is rarely used; prefer the HTTP server for a provider that speaks often.
 
 `model-path` is checked for existence **at start-up**, and so is its `.onnx.json` config sidecar
 (Piper won't load a model without it) — a missing one aborts host start-up and names this
@@ -415,6 +417,7 @@ providers:
     type: PIPER
     python-executable: /opt/piper-venv/bin/python3
     model-path: /opt/piper/models/en_US-ryan-medium.onnx
+    timeout-seconds: 30
 ```
 
 ## Playback over what is playing
