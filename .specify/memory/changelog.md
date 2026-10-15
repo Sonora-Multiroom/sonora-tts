@@ -4,6 +4,25 @@
 
 Newest first.
 
+### 008 Answer A Malformed Target Name With 400, Not 500 — archived 2026-10-15
+**Branch:** `008-malformed-target-name`
+**Spec:** [.specify/archive/008-malformed-target-name/spec.md](../archive/008-malformed-target-name/spec.md)
+**Release:** `multiroom-tts` 0.1.7, still requires `multiroom-api` 0.1.21 (adapts to hub 026)
+
+**What was added:**
+
+- A `targetName` that breaks the hub's ID rule answers 400 `TARGET_NOT_FOUND` ("… (not a valid
+  ID)") in the contract's `ErrorResponse` shape and is counted under `TARGET_NOT_FOUND`, instead of
+  escaping as a 500 counted as `INTERNAL` once hub 026 removed its global exception mapper
+- The ID rule is stated in the `targetName` OpenAPI description
+
+**New Components:**
+
+- `TtsService.parseTargetId` (private); no new class, code, field or metric
+
+No `tasks.md`: the fix skipped plan and tasks; its `plan.md` was written afterwards for archival,
+and what was run is in its `verification.md`.
+
 ### 007 An Announcement That Fails To Start Ends Once, As A Failure — archived 2026-10-15
 **Branch:** `007-failed-start-cleanup`
 **Spec:** [.specify/archive/007-failed-start-cleanup/spec.md](../archive/007-failed-start-cleanup/spec.md)

@@ -19,6 +19,9 @@
 > verification (T026–T028) added. No dependency, configuration or HTTP change.
 > **Revision**: 2026-10-15 — re-archived `.specify/archive/007-failed-start-cleanup` after T030 closed: the
 > `startedAt` decision now records that the hub documents its meaning (`d7f3b46`).
+> **Revision**: 2026-10-15 — archived `.specify/archive/008-malformed-target-name`: a malformed target name
+> answers 400 `TARGET_NOT_FOUND` (HTTP surface), 008's design decisions, testing note and production
+> check. No dependency or configuration change; version 0.1.7.
 
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
@@ -27,8 +30,9 @@ planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension
 `003-google-service-account-auth` [Source: .specify/archive/003-google-service-account-auth/plan.md]
 `004-gemini-tts-provider` [Source: .specify/archive/004-gemini-tts-provider/plan.md],
 `005-tts-metrics` [Source: .specify/archive/005-tts-metrics/plan.md],
-`006-announcement-ducking` [Source: .specify/archive/006-announcement-ducking/plan.md] and
-`007-failed-start-cleanup` [Source: .specify/archive/007-failed-start-cleanup/plan.md].
+`006-announcement-ducking` [Source: .specify/archive/006-announcement-ducking/plan.md],
+`007-failed-start-cleanup` [Source: .specify/archive/007-failed-start-cleanup/plan.md] and
+`008-malformed-target-name` [Source: .specify/archive/008-malformed-target-name/plan.md].
 
 ## Shape
 
@@ -226,6 +230,12 @@ the JAR:
 could not be read")`, which brings the implementation in line with v0.1.3; a 405 or 415 that Spring
 refuses before any advice is chosen is not answered by this module
 [Source: .specify/archive/005-tts-metrics/research.md -> R6].
+
+008 added no endpoint, field or code. Since hub 026 (no global `GlobalExceptionMapper`), a
+`targetName` that `OutputId.of` / `GroupId.of` refuses answers 400 `TARGET_NOT_FOUND` in the
+`ErrorResponse` shape instead of a 500 from Spring's `/error`; the `targetName` OpenAPI description
+states the rule ("1-255 letters, digits, hyphens or underscores")
+[Source: .specify/archive/008-malformed-target-name/plan.md -> "Summary"].
 
 ### Metrics
 
@@ -508,6 +518,21 @@ operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
   `tts-<uuid>` input never is; any other `RuntimeException` stays WARN with the stack trace. A
   never-started route is logged by the listener at DEBUG only
 
+[Source: .specify/archive/008-malformed-target-name/plan.md]
+
+- **Convert at the one call site**: `TtsService.validateTargetExists` builds the ID through
+  `parseTargetId(OutputId::of | GroupId::of, name)`, which turns the `IllegalArgumentException` into
+  `TtsException(TARGET_NOT_FOUND, "… (not a valid ID)")`. `(OutputId|GroupId).of(` occurs nowhere
+  else on caller text: `createRoute` runs on an accepted name, and the cache and voice endpoints
+  take no target. A blanket `IllegalArgumentException` mapping in `TtsExceptionHandler` was
+  rejected because it would turn real bugs into 400s
+- **`TARGET_NOT_FOUND`, not `INVALID_REQUEST`**: same fix for the caller, sonora-cli maps it to
+  "target not found" (exit 12) rather than a generic validation error (exit 6), and it stays right
+  if the hub relaxes its ID rule
+- **No `@Pattern` on `SpeakRequest.targetName`**: bean validation runs first and would answer
+  `INVALID_REQUEST` with provider `unknown`; the regex would copy the hub's `DomainId` rule here,
+  where it drifts unnoticed. The OpenAPI description states the rule instead
+
 ## Testing strategy
 
 Unit and slice tests only; nothing boots the host.
@@ -560,6 +585,10 @@ Unit and slice tests only; nothing boots the host.
   `abandon` after an already-handled task; `PlaybackCompletionListenerTest`'s `routeTo` helper sets
   `startedAt`, a never-started route stays tracked, `cancel` reports its removal, and an
   already-removed input logs no WARN
+- Malformed target names (008) [Source: .specify/archive/008-malformed-target-name/plan.md -> "Testing"]:
+  `TtsServiceTest.aNameThatIsNotAValidIdRaisesTargetNotFound` for an output and a group. The test
+  classpath has no `multiroom-rest`, so no test here ever ran with the hub's global advice — the
+  500 was invisible to the suite until a test asserted the code itself
 - JaCoCo's 80 % floor fails `mvn verify`
 
 ## Build, deploy, verify
@@ -600,7 +629,11 @@ core proves the JAR loads.
    `mvn clean verify` green (688 tests), a local smoke run on a 0.1.22 core (`tts` 0.1.6 `ACTIVE`),
    and a production check with one normal announcement (STARTED and COMPLETED once, `started` 1, no
    `failed`); a failed start cannot be provoked safely on production and is covered by unit tests
-   only [Source: .specify/archive/007-failed-start-cleanup/verification.md]
+   only [Source: .specify/archive/007-failed-start-cleanup/verification.md]. 008's: `mvn verify`
+   green (690 tests), the local smoke run skipped, and a production check on hub 0.1.25 — four
+   rejected requests (`living room` and an unknown valid name, output and group) all 400
+   `TARGET_NOT_FOUND`, counted under that code, no `INTERNAL` series and no stack trace
+   [Source: .specify/archive/008-malformed-target-name/verification.md]
 
 ---
 

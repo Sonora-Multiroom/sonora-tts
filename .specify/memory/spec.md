@@ -16,6 +16,10 @@
 > entities, the failed-start branch of the lifecycle, edge cases, success criteria and AS-017–AS-021.
 > **Revision**: 2026-10-15 — re-archived `.specify/archive/007-failed-start-cleanup` after T030 closed: AS-018
 > now records that the hub documents `startedAt == null` as "never went live".
+> **Revision**: 2026-10-15 — archived `.specify/archive/008-malformed-target-name`: a target name that breaks
+> the hub's ID rule answers 400 `TARGET_NOT_FOUND` — 001/FR-010 annotated, the "Unknown target"
+> edge case extended, a 0.1.7 paragraph under "Current state". 008 states no stories, numbered
+> requirements, success criteria or assumptions, so none were added.
 
 **Scope**: one extension for the multiroom audio system — text-to-speech announcements delivered to a
 room or a group of rooms.
@@ -112,6 +116,12 @@ before the start failure reaches the extension, which reported it as completed a
 queue twice. Now such an announcement is reported once, as `TTS_PLAYBACK_FAILED`, with one failed
 playback and one queue signal, identically on a 0.1.21 and a 0.1.22 hub. No API bump, no endpoint,
 field or metric change [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-001, FR-006].
+
+**Malformed target names** in 0.1.7 by `008-malformed-target-name` (archived here 2026-10-15): once
+hub 026 removed its global exception mapper, a `targetName` breaking the hub's ID rule (`"living
+room"`) escaped as a 500 counted as `INTERNAL`. It now answers 400 `TARGET_NOT_FOUND` in the
+contract's `ErrorResponse` shape and is counted under that code. No API bump (still 0.1.21), no new
+code or field [Source: .specify/archive/008-malformed-target-name/spec.md -> "Proposal"].
 
 Features in progress live under [specs/](../../specs/) until they are archived here.
 
@@ -527,7 +537,14 @@ the archived spec behind an ID for its full wording.
   `GOOGLE_GEMINI` (since 004), `PIPER` (piper1-gpl, `python3 -m piper`), `LOCAL_HTTP`
 - **001/FR-005** Default provider: explicit, or the first in the list
 - **001/FR-010, FR-011, FR-021** Clear errors for an unknown target, an unreachable or failing
-  provider, and a rate limit — never an automatic retry
+  provider, and a rate limit — never an automatic retry. *Amended by 008*: a target name that breaks
+  the hub's ID rule (1–255 letters, digits, hyphens or underscores; `"living room"`, a display name
+  with an apostrophe) is an unknown target too: 400 `TARGET_NOT_FOUND`, message "No output or output
+  group named '…' found (not a valid ID)", counted under `TARGET_NOT_FOUND`, never `INTERNAL`. Not
+  `INVALID_REQUEST`, because the caller's fix is the same (pick a real output or group) and
+  sonora-cli then reports "target not found"; the allowed characters are stated in the `targetName`
+  OpenAPI description rather than checked by a pattern here
+  [Source: .specify/archive/008-malformed-target-name/spec.md -> "Proposal"]
 - **001/FR-022** Per-provider synthesis timeout, default 10 s; a longer one is allowed and warned
   about by name at start-up
 - **001/FR-023** Audio the shared converter refuses is rejected; nothing plays
@@ -1036,7 +1053,10 @@ the provider call (conversion outside the timing), and the playback start is cou
 
 [Source: .specify/archive/001-tts-extension]
 
-- Unknown target or provider: rejected before any synthesis
+- Unknown target or provider: rejected before any synthesis. Since 008 this includes a target name
+  the hub's ID rule refuses (`"living room"`), which never reaches the device lookup
+  [Source: .specify/archive/008-malformed-target-name/spec.md -> "Problem"]
+  [Source: .specify/archive/008-malformed-target-name/verification.md -> "Production"]
 - Concurrent requests for one target: both synthesized as they arrive, played in arrival order, no
   deduplication. Since 006 the second never lowers the first (the per-target queue is unchanged)
   [Source: .specify/archive/006-announcement-ducking/spec.md -> "Two announcements for the same target"]
