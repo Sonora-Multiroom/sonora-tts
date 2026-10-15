@@ -1020,9 +1020,11 @@ RECEIVED → VALIDATED            text, then playbackMode (006), target, provide
                         → CONVERTING → AUDIO_READY                (or FAILED → 503)
                         token, catalogue fetch and synthesis share the entry's timeout
   → QUEUED      nothing audible changes; an enqueue failure unpins / deletes the spill file → 503
-  → ROUTING   registerInput("tts://<uuid>", autoRemove); createRoute(input, target, playback
+  → ROUTING   track; registerInput("tts://<uuid>", autoRemove); createRoute(input, target, playback
               mode) — core resolves tts:// to the WAV's file:// URI. No snapshot, nothing stopped
               (since 006)
+              registerInput failure → ERROR TTS_PLAYBACK_FAILED, handled as a failed start below
+              (an input that was never registered is tolerated by unregisterInput)
               host refusal (RouteAdmissionException) → WARN TTS_PLAYBACK_REFUSED, playback failed;
               admitted but failed to start → ERROR TTS_PLAYBACK_FAILED (since 007); on hub
               0.1.22+ its end-of-route notice (no startedAt) arrives first and is left to this

@@ -92,7 +92,7 @@ public class TtsService implements SmartLifecycle {
         this.completionListener = completionListener;
         this.metrics = metrics;
         this.queueManager = new AnnouncementQueueManager(properties.getQueue().getMaxDepthPerTarget(),
-                this::activateCountingEarlyFailures);
+                this::activate);
     }
 
     /**
@@ -243,32 +243,25 @@ public class TtsService implements SmartLifecycle {
     }
 
     /**
-     * What the queue runs. {@link #activate} counts a failed route itself and does not rethrow,
-     * so only a failure before the route step (registering the input, tracking it) reaches the
-     * catch here, and no failure is counted twice.
+     * Invoked by the queue worker when this task's target frees up. Every failure, registering the
+     * input included, ends through {@link #abandon}, which counts it and releases what the
+     * announcement holds; the queue's own catch is left only for a failure inside that cleanup.
+     *
+     * <p>The announcement is tracked first so {@code abandon} can reach it. Tracking before the
+     * route exists is safe: no {@code RouteDestroyedEvent} can name an input that has no route.
      */
-    private void activateCountingEarlyFailures(AnnouncementTask task, Runnable onPlaybackComplete) {
-        try {
-            activate(task, onPlaybackComplete);
-        } catch (RuntimeException e) {
-            metrics.playbackFailed();
-            throw e;
-        }
-    }
-
-    /** Invoked by the queue worker when this task's target frees up. */
     private void activate(AnnouncementTask task, Runnable onPlaybackComplete) {
-        inputResolver.register(task.announcementId(), task.audioFile());
-        var input = multiroom.api.model.AudioInputDefinition.builder()
-                .inputId(task.inputId())
-                .displayName("TTS announcement " + task.announcementId())
-                .uri("tts://" + task.announcementId())
-                .enabled(true)
-                .autoRemove(true)
-                .build();
-        deviceRegistryService.registerInput(input);
         completionListener.track(task, onPlaybackComplete);
         try {
+            inputResolver.register(task.announcementId(), task.audioFile());
+            var input = multiroom.api.model.AudioInputDefinition.builder()
+                    .inputId(task.inputId())
+                    .displayName("TTS announcement " + task.announcementId())
+                    .uri("tts://" + task.announcementId())
+                    .enabled(true)
+                    .autoRemove(true)
+                    .build();
+            deviceRegistryService.registerInput(input);
             var joinMode = task.playbackMode().joinMode();
             if (task.targetType() == TargetType.SINGLE_OUTPUT) {
                 routeService.createRoute(task.inputId(), OutputId.of(task.targetName()), joinMode);
@@ -291,7 +284,8 @@ public class TtsService implements SmartLifecycle {
     }
 
     /**
-     * Ends an announcement whose route was refused or failed to start. It is not retried: a late
+     * Ends an announcement whose input could not be registered, or whose route was refused or
+     * failed to start. It is not retried: a late
      * announcement is worse than none. This path owns the end of such an announcement in both hub
      * orders: on 0.1.22 and later the hub publishes a {@code RouteDestroyedEvent} without a start
      * time for an admitted route that failed to start before {@code createRoute} throws, and the
@@ -299,7 +293,8 @@ public class TtsService implements SmartLifecycle {
      * publishes no event, and a refusal never does.
      *
      * <p>Unregistering the input is this path's job too: the hub auto-removes an {@code autoRemove}
-     * input only after a route on it went live. An input that is already gone is tolerated. The
+     * input only after a route on it went live. An input that is already gone, or was never
+     * registered, is tolerated. The
      * queue is signalled only when {@code cancel} removed the entry, so the end is handled once.
      */
     private void abandon(AnnouncementTask task, Runnable onPlaybackComplete) {
@@ -312,7 +307,7 @@ public class TtsService implements SmartLifecycle {
             // announcement's tts-<uuid> input never is, so this always means "already removed".
             log.debug("Ephemeral input {} was already removed", task.inputId());
         } catch (RuntimeException unregisterFailure) {
-            log.warn("Failed to unregister ephemeral input {} after failed route creation",
+            log.warn("Failed to unregister ephemeral input {} after a failed activation",
                     task.inputId(), unregisterFailure);
         }
         if (removed) {
