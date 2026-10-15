@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link PiperTtsProvider} shells out to {@code <pythonExecutable> -m piper --model <path>
- * --config <path>}. These tests stand a fake script in for the Python interpreter — it receives
+ * --config <path> --output-file -}. These tests stand a fake script in for the Python interpreter — it receives
  * the same argument vector and stdin text a real {@code python3 -m piper} invocation would.
  */
 class PiperTtsProviderTest {
@@ -79,6 +79,19 @@ class PiperTtsProviderTest {
                 .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("ryan", "en-US", null), 22050, 1));
 
         assertThat(new String(result.audioData(), StandardCharsets.UTF_8)).contains("FAKE_WAV_DATA");
+    }
+
+    @Test
+    void asksPiperToWriteTheWavToStdout(@TempDir Path dir) throws Exception {
+        Path fakePython = script(dir, "fake-python-args",
+                "@echo off\r\necho %*\r\n",
+                "#!/bin/sh\ncat > /dev/null\necho \"$@\"\n");
+        Path model = modelWithConfig(dir);
+
+        SynthesisResult result = new PiperTtsProvider(configFor(fakePython, model, 5))
+                .synthesize(new SynthesisRequest("hello", SynthesisSettings.of("ryan", "en-US", null), 22050, 1));
+
+        assertThat(new String(result.audioData(), StandardCharsets.UTF_8).strip()).endsWith("--output-file -");
     }
 
     @Test
