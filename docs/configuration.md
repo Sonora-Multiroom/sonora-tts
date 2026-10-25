@@ -315,6 +315,8 @@ every metric, the definition of billable usage, and example queries.
 | `cache.max-size-mb` | `500` | LRU-evicted once the cache exceeds this |
 | `queue.max-depth-per-target` | `10` | Max pending announcements per output/group |
 | `playback.default-mode` | `duck-others` | How an announcement joins what is playing: `duck-others` (lowers it) or `mix` (leaves it). Case-insensitive; anything else aborts start-up with `multiroom-tts: playback.default-mode '<value>' is not one of duck-others, mix` |
+| `playback.route-volume` | *(unset)* | Volume, 0-100, of every announcement. It replaces the target outputs' volume for the announcement only, so the room's volume control does not reach it. Unset: the announcement follows the outputs' volume. A request's `routeVolume` wins. Outside 0-100 aborts start-up |
+| `playback.ducking-level-db` | *(unset)* | How far a `duck-others` announcement lowers what else plays, in dB from -60.0 to 0.0. Unset: the hub's input default and system level (`audio.mixing.ducking.level-db`). Never sent for a `mix` announcement. A request's `duckingLevelDb` wins. Outside the range aborts start-up |
 | `voice-catalogue.ttl` | `24h` | `GOOGLE_CLOUD` only: how long a fetched voice list is trusted. Must be positive |
 | `voice-catalogue.failure-backoff` | `60s` | `GOOGLE_CLOUD` only: no fetch this long after a failed one. Must be positive |
 | `voice-catalogue.fetch-timeout` | `3s` | `GOOGLE_CLOUD` only: cap on one voice-list fetch. Must be positive |
@@ -426,11 +428,19 @@ An announcement joins its target; it does not stop what plays there. With `duck-
 default) the host lowers the other routes for the length of the announcement and restores them
 afterwards; with `mix` they play on at their own level. A request chooses with `playbackMode`
 (`"duck-others"` or `"mix"`); any other value is `400 INVALID_REQUEST` before anything is
-synthesized. These host settings (in `multiroom.yml`, not this extension's) govern the result:
+synthesized.
+
+A request can also set `routeVolume` (0-100, this announcement only) and, with `duck-others`,
+`duckingLevelDb` (-60.0 to 0.0, how far it lowers the rest). A value out of range, or a
+`duckingLevelDb` with `mix`, is `400 INVALID_REQUEST` before anything is synthesized. The defaults
+above (`playback.route-volume`, `playback.ducking-level-db`) apply when a request names none and are
+read when the request is accepted. These settings need a hub with `multiroom-api` 0.1.29 or later.
+
+These host settings (in `multiroom.yml`, not this extension's) govern the result:
 
 | Host key | Default | Effect on announcements |
 |---|---|---|
-| `audio.mixing.ducking.level-db` | `-15.0` | How far the music drops under a `duck-others` announcement |
+| `audio.mixing.ducking.level-db` | `-15.0` | How far the music drops under a `duck-others` announcement that names no level of its own |
 | `audio.mixing.ducking.fade-millis` | `150` | The lowering and restoring ramp |
 | `audio.mixing.max-routes-per-output` | `4` | An announcement that would exceed it on any target output is refused: logged as `TTS_PLAYBACK_REFUSED`, counted as a failed playback and dropped, not retried |
 

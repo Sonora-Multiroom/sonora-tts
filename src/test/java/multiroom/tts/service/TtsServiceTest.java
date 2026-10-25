@@ -16,6 +16,7 @@ import multiroom.api.exceptions.RouteException;
 import multiroom.api.model.Route;
 import multiroom.api.model.RouteId;
 import multiroom.api.model.RouteJoinMode;
+import multiroom.api.model.RouteOptions;
 import multiroom.api.model.RouteStatus;
 import multiroom.api.model.SampleFormat;
 import multiroom.api.model.TargetType;
@@ -212,7 +213,7 @@ class TtsServiceTest {
         assertThat(result.cacheHit()).isFalse();
         verify(openaiProvider).synthesize(any());
         verify(deviceRegistryService, timeout(ASYNC_TIMEOUT_MS)).registerInput(any());
-        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), eq(OutputId.of("living-room")), eq(RouteJoinMode.DUCK_OTHERS));
+        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), eq(OutputId.of("living-room")), eq(RouteOptions.of(RouteJoinMode.DUCK_OTHERS)));
         verify(deviceRegistryService, never()).unregisterInput(any());
     }
 
@@ -226,9 +227,9 @@ class TtsServiceTest {
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
         service.speak(new AnnounceCommand("Motion detected", "all-rooms", TargetType.OUTPUT_GROUP, null, null, null, null, null, null));
 
-        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), eq(GroupId.of("all-rooms")), eq(RouteJoinMode.DUCK_OTHERS));
-        verify(routeService, never()).createRoute(any(InputId.class), eq(OutputId.of("living-room")), eq(RouteJoinMode.DUCK_OTHERS));
-        verify(routeService, never()).createRoute(any(InputId.class), eq(OutputId.of("kitchen")), any(RouteJoinMode.class));
+        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), eq(GroupId.of("all-rooms")), eq(RouteOptions.of(RouteJoinMode.DUCK_OTHERS)));
+        verify(routeService, never()).createRoute(any(InputId.class), eq(OutputId.of("living-room")), eq(RouteOptions.of(RouteJoinMode.DUCK_OTHERS)));
+        verify(routeService, never()).createRoute(any(InputId.class), eq(OutputId.of("kitchen")), any(RouteOptions.class));
         verifyNoMoreInteractions(routeService);
     }
 
@@ -248,11 +249,11 @@ class TtsServiceTest {
         service.speak(new AnnounceCommand("Motion", "all-rooms", TargetType.OUTPUT_GROUP, null, null, null, null,
                 null, null));
         verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class),
-                eq(GroupId.of("all-rooms")), eq(RouteJoinMode.DUCK_OTHERS));
+                eq(GroupId.of("all-rooms")), eq(RouteOptions.of(RouteJoinMode.DUCK_OTHERS)));
         service.speak(speakTo("kitchen", null));
 
         verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class),
-                eq(OutputId.of("kitchen")), eq(RouteJoinMode.DUCK_OTHERS));
+                eq(OutputId.of("kitchen")), eq(RouteOptions.of(RouteJoinMode.DUCK_OTHERS)));
     }
 
     @Test
@@ -337,7 +338,7 @@ class TtsServiceTest {
 
         assertThat(result).isNotNull();
         verify(deviceRegistryService, timeout(ASYNC_TIMEOUT_MS)).registerInput(any());
-        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), eq(OutputId.of("living-room")), eq(RouteJoinMode.DUCK_OTHERS));
+        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), eq(OutputId.of("living-room")), eq(RouteOptions.of(RouteJoinMode.DUCK_OTHERS)));
     }
 
     @Test
@@ -423,7 +424,7 @@ class TtsServiceTest {
     @Test
     void routeCreationFailureCancelsTrackingAndUnregistersTheOrphanedInput() {
         when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
-        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteOptions.class)))
                 .thenThrow(new RuntimeException("output disappeared"));
 
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
@@ -475,7 +476,7 @@ class TtsServiceTest {
         service.speak(new AnnounceCommand("Hi", "living-room", TargetType.SINGLE_OUTPUT, null, null, null, null, null, null));
 
         verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class),
-                eq(OutputId.of("living-room")), eq(RouteJoinMode.DUCK_OTHERS));
+                eq(OutputId.of("living-room")), eq(RouteOptions.of(RouteJoinMode.DUCK_OTHERS)));
         verifyNoMoreInteractions(routeService);
     }
 
@@ -488,11 +489,11 @@ class TtsServiceTest {
         // first announcement and the second is accepted but only queued.
         service.speak(speakTo("living-room", null));
         verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), any(OutputId.class),
-                any(RouteJoinMode.class));
+                any(RouteOptions.class));
         service.speak(speakTo("living-room", null));
 
         verify(routeService, after(200).times(1)).createRoute(any(InputId.class), any(OutputId.class),
-                any(RouteJoinMode.class));
+                any(RouteOptions.class));
         verifyNoMoreInteractions(routeService);
     }
 
@@ -977,7 +978,7 @@ class TtsServiceTest {
         // The mocked completion listener never signals completion, so the first announcement
         // occupies the worker for good and the second fills the one queue slot.
         service.speak(speakTo("living-room", null));
-        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class));
+        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class));
         service.speak(speakTo("living-room", null));
 
         assertThatThrownBy(() -> service.speak(speakTo("living-room", null))).isInstanceOf(TtsException.class);
@@ -1025,7 +1026,7 @@ class TtsServiceTest {
     @Test
     void aRefusedRouteReleasesEverythingAndMovesTheQueueOn() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
-        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteOptions.class)))
                 .thenThrow(refusal("living-room"))
                 .thenReturn(aRoute("living-room"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
@@ -1034,7 +1035,7 @@ class TtsServiceTest {
         service.speak(speakTo("living-room", null));
 
         verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
-                eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+                eq(OutputId.of("living-room")), any(RouteOptions.class));
         verify(metrics, times(1)).playbackFailed();
         verify(metrics, timeout(ASYNC_TIMEOUT_MS).times(1)).playbackStarted();
         verify(completionListener, times(1)).cancel(any(InputId.class));
@@ -1045,7 +1046,7 @@ class TtsServiceTest {
     @Test
     void aRefusalIsLoggedWithTheHostsReasonAndOutput() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
-        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class)))
                 .thenThrow(refusal("living-room"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
@@ -1066,7 +1067,7 @@ class TtsServiceTest {
     @Test
     void aNonAdmissionRouteFailureIsStillAnError() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
-        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class)))
                 .thenThrow(new RouteException("output disappeared"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
@@ -1090,7 +1091,7 @@ class TtsServiceTest {
                 OutputGroup.builder().groupId(GroupId.of("all-rooms")).displayName("All Rooms")
                         .outputIds(List.of(OutputId.of("living-room"), OutputId.of("kitchen"))).enabled(true).build()));
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
-        when(routeService.createRoute(any(InputId.class), eq(GroupId.of("all-rooms")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(GroupId.of("all-rooms")), any(RouteOptions.class)))
                 .thenThrow(refusal("kitchen"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
@@ -1101,7 +1102,7 @@ class TtsServiceTest {
         });
 
         verify(deviceRegistryService, timeout(ASYNC_TIMEOUT_MS)).unregisterInput(any(InputId.class));
-        verify(routeService, times(1)).createRoute(any(InputId.class), any(GroupId.class), any(RouteJoinMode.class));
+        verify(routeService, times(1)).createRoute(any(InputId.class), any(GroupId.class), any(RouteOptions.class));
         verifyNoMoreInteractions(routeService);
         assertThat(events).anyMatch(e -> e.getFormattedMessage().contains("output=kitchen"));
     }
@@ -1166,7 +1167,7 @@ class TtsServiceTest {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
         PlaybackCompletionListener listener = useRealListener();
         List<InputId> seen = new java.util.concurrent.CopyOnWriteArrayList<>();
-        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class)))
                 .thenAnswer(failAfterAdmission(listener, seen));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
@@ -1191,7 +1192,7 @@ class TtsServiceTest {
     @Test
     void anAlreadyRemovedInputAfterAFailedStartIsNotAWarning() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
-        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class)))
                 .thenThrow(new RouteException("output disappeared"));
         doThrow(new IllegalArgumentException("Input 'tts-x' is not registered"))
                 .when(deviceRegistryService).unregisterInput(any(InputId.class));
@@ -1209,7 +1210,7 @@ class TtsServiceTest {
     @Test
     void anUnexpectedUnregisterFailureAfterAFailedStartIsStillAWarning() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
-        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class)))
                 .thenThrow(new RouteException("output disappeared"));
         doThrow(new IllegalStateException("boom")).when(deviceRegistryService).unregisterInput(any(InputId.class));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
@@ -1230,7 +1231,7 @@ class TtsServiceTest {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
         PlaybackCompletionListener listener = useRealListener();
         List<InputId> seen = new java.util.concurrent.CopyOnWriteArrayList<>();
-        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteOptions.class)))
                 .thenAnswer(failAfterAdmission(listener, seen))
                 .thenAnswer(succeedAndRecord(seen));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
@@ -1239,7 +1240,7 @@ class TtsServiceTest {
         service.speak(speakTo("living-room", null));
 
         verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
-                eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+                eq(OutputId.of("living-room")), any(RouteOptions.class));
         verify(metrics, timeout(ASYNC_TIMEOUT_MS).times(1)).playbackStarted();
         verify(metrics, times(1)).playbackFailed();
         verify(audioCache, times(1)).unpin(any(CacheKey.class));
@@ -1251,7 +1252,7 @@ class TtsServiceTest {
     void abandonDoesNotSignalTheQueueWhenTheEndWasAlreadyHandled() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
         when(completionListener.cancel(any(InputId.class))).thenReturn(false);
-        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteOptions.class)))
                 .thenThrow(new RouteException("device would not open"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
@@ -1259,7 +1260,7 @@ class TtsServiceTest {
         service.speak(speakTo("living-room", null));
 
         verify(routeService, after(300).times(1)).createRoute(any(InputId.class),
-                eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+                eq(OutputId.of("living-room")), any(RouteOptions.class));
         verify(metrics, times(1)).playbackFailed();
         verify(deviceRegistryService, times(1)).unregisterInput(any(InputId.class));
     }
@@ -1268,7 +1269,7 @@ class TtsServiceTest {
     void aStartThatFailsOnAnOlderHubWithoutAnEventIsReportedTheSame() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
         useRealListener();
-        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteOptions.class)))
                 .thenThrow(new RouteException("device would not open"))
                 .thenReturn(aRoute("living-room"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
@@ -1277,7 +1278,7 @@ class TtsServiceTest {
             service.speak(speakTo("living-room", null));
             service.speak(speakTo("living-room", null));
             verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
-                    eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+                    eq(OutputId.of("living-room")), any(RouteOptions.class));
             verify(metrics, timeout(ASYNC_TIMEOUT_MS)).playbackStarted();
         }, TtsService.class, PlaybackCompletionListener.class);
 
@@ -1299,7 +1300,7 @@ class TtsServiceTest {
             listener.onRouteDestroyed(new RouteDestroyedEvent(finished));
             return finished;
         };
-        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteOptions.class)))
                 .thenAnswer(endsImmediately)
                 .thenReturn(aRoute("living-room"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
@@ -1308,7 +1309,7 @@ class TtsServiceTest {
             service.speak(speakTo("living-room", null));
             service.speak(speakTo("living-room", null));
             verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
-                    eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+                    eq(OutputId.of("living-room")), any(RouteOptions.class));
         }, TtsService.class, PlaybackCompletionListener.class);
 
         assertThat(events).anyMatch(e -> startsWith(e, "TTS_PLAYBACK_STARTED"));
@@ -1321,7 +1322,7 @@ class TtsServiceTest {
     void aRefusalWithTheRealListenerReleasesOnceAndMovesTheQueueOn() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
         useRealListener();
-        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteOptions.class)))
                 .thenThrow(refusal("living-room"))
                 .thenReturn(aRoute("living-room"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
@@ -1330,7 +1331,7 @@ class TtsServiceTest {
             service.speak(speakTo("living-room", null));
             service.speak(speakTo("living-room", null));
             verify(routeService, timeout(ASYNC_TIMEOUT_MS).times(2)).createRoute(any(InputId.class),
-                    eq(OutputId.of("living-room")), any(RouteJoinMode.class));
+                    eq(OutputId.of("living-room")), any(RouteOptions.class));
         }, TtsService.class, PlaybackCompletionListener.class);
 
         List<ch.qos.logback.classic.spi.ILoggingEvent> refused =
@@ -1352,7 +1353,7 @@ class TtsServiceTest {
                 .when(deviceRegistryService).registerInput(any());
         doThrow(new IllegalArgumentException("Input 'tts-x' is not registered"))
                 .when(deviceRegistryService).unregisterInput(any(InputId.class));
-        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), eq(OutputId.of("living-room")), any(RouteOptions.class)))
                 .thenReturn(aRoute("living-room"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
@@ -1368,7 +1369,7 @@ class TtsServiceTest {
         assertThat(failed.get(0).getThrowableProxy()).isNotNull();
         assertThat(events).noneMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN);
         verify(routeService, times(1)).createRoute(any(InputId.class), eq(OutputId.of("living-room")),
-                any(RouteJoinMode.class));
+                any(RouteOptions.class));
         verify(metrics, times(1)).playbackFailed();
         verify(audioCache, times(1)).unpin(any(CacheKey.class));
         verify(inputResolver, times(1)).release(any(UUID.class));
@@ -1393,7 +1394,7 @@ class TtsServiceTest {
         assertThat(spilled.get(0)).doesNotExist();
         verify(audioCache, never()).unpin(any(CacheKey.class));
         verify(metrics, times(1)).playbackFailed();
-        verify(routeService, never()).createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class));
+        verify(routeService, never()).createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class));
     }
 
     private static AnnounceCommand speakWithMode(String mode) {
@@ -1409,7 +1410,7 @@ class TtsServiceTest {
         service.speak(speakWithMode("mix"));
 
         verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class),
-                eq(OutputId.of("living-room")), eq(RouteJoinMode.MIX));
+                eq(OutputId.of("living-room")), eq(RouteOptions.of(RouteJoinMode.MIX)));
     }
 
     @Test
@@ -1426,7 +1427,7 @@ class TtsServiceTest {
         service.speak(speakTo("living-room", null));
 
         verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class),
-                eq(OutputId.of("living-room")), eq(RouteJoinMode.MIX));
+                eq(OutputId.of("living-room")), eq(RouteOptions.of(RouteJoinMode.MIX)));
     }
 
     @Test
@@ -1481,7 +1482,7 @@ class TtsServiceTest {
     /** Fills the one queue slot, so the next announcement to living-room is refused. */
     private void occupyTheQueue(TtsService service) {
         service.speak(speakTo("living-room", null));
-        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class));
+        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class));
         service.speak(speakTo("living-room", null));
     }
 
@@ -1652,7 +1653,7 @@ class TtsServiceTest {
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
         service.speak(speakTo("living-room", null));
-        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class));
+        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class));
         service.speak(speakTo("living-room", null));
 
         ArgumentCaptor<IntSupplier> depth = ArgumentCaptor.forClass(IntSupplier.class);
@@ -1685,7 +1686,7 @@ class TtsServiceTest {
     @Test
     void aRouteThatCannotBeCreatedIsCountedAsAFailedPlayback() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
-        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteJoinMode.class)))
+        when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class)))
                 .thenThrow(new IllegalStateException("no route"));
         TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
 
@@ -1761,5 +1762,117 @@ class TtsServiceTest {
         assertThat(tagValues).noneMatch(value -> value.startsWith("text ") || value.startsWith("voice-")
                 || value.startsWith("provider-") || value.contains("CANARY"));
         assertThat(tagValues).contains("unknown", "openai");
+    }
+
+    // ─── route volume and ducking level ───────────────────────────────────────
+
+    private AnnounceCommand speakWith(String mode, Integer routeVolume, Double duckingLevelDb) {
+        return new AnnounceCommand("Dinner is ready", "living-room", TargetType.SINGLE_OUTPUT, null, null, null,
+                null, null, null, null, mode, routeVolume, duckingLevelDb);
+    }
+
+    private RouteOptions routeOptionsOfTheStartedAnnouncement() throws Exception {
+        var captor = org.mockito.ArgumentCaptor.forClass(RouteOptions.class);
+        verify(routeService, timeout(ASYNC_TIMEOUT_MS)).createRoute(any(InputId.class),
+                eq(OutputId.of("living-room")), captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void routeVolumeAndDuckingLevelGoToTheRouteOptions() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        service.speak(speakWith("duck-others", 100, -25.0));
+
+        RouteOptions options = routeOptionsOfTheStartedAnnouncement();
+        assertThat(options.getJoinMode()).isEqualTo(RouteJoinMode.DUCK_OTHERS);
+        assertThat(options.getRouteVolume()).isEqualTo(100);
+        assertThat(options.getDuckingLevelDb()).isEqualTo(-25.0);
+    }
+
+    @Test
+    void theConfiguredDefaultsApplyWhenTheRequestNamesNone() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsProperties properties = propertiesWithPlayback(80, -30.0);
+        TtsService service = newService(properties, registryFor(properties));
+
+        service.speak(speakWith(null, null, null));
+
+        RouteOptions options = routeOptionsOfTheStartedAnnouncement();
+        assertThat(options.getRouteVolume()).isEqualTo(80);
+        assertThat(options.getDuckingLevelDb()).isEqualTo(-30.0);
+    }
+
+    @Test
+    void aRequestValueWinsOverTheConfiguredDefault() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsProperties properties = propertiesWithPlayback(80, -30.0);
+        TtsService service = newService(properties, registryFor(properties));
+
+        service.speak(speakWith("duck-others", 40, -10.0));
+
+        RouteOptions options = routeOptionsOfTheStartedAnnouncement();
+        assertThat(options.getRouteVolume()).isEqualTo(40);
+        assertThat(options.getDuckingLevelDb()).isEqualTo(-10.0);
+    }
+
+    @Test
+    void aMixAnnouncementSendsNoDuckingLevelEvenWithAConfiguredDefault() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsProperties properties = propertiesWithPlayback(80, -30.0);
+        TtsService service = newService(properties, registryFor(properties));
+
+        service.speak(speakWith("mix", null, null));
+
+        RouteOptions options = routeOptionsOfTheStartedAnnouncement();
+        assertThat(options.getJoinMode()).isEqualTo(RouteJoinMode.MIX);
+        assertThat(options.getRouteVolume()).isEqualTo(80);
+        assertThat(options.getDuckingLevelDb()).isNull();
+    }
+
+    @Test
+    void aDuckingLevelWithMixIsRefusedBeforeAnythingIsSynthesizedOrQueued() {
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        assertThatThrownBy(() -> service.speak(speakWith("mix", null, -20.0)))
+                .isInstanceOf(TtsException.class)
+                .satisfies(e -> assertThat(((TtsException) e).getErrorCode()).isEqualTo(TtsErrorCode.INVALID_REQUEST))
+                .hasMessageContaining("duckingLevelDb");
+
+        verifyNoInteractions(openaiProvider, piperProvider);
+        verify(audioCache, never()).get(any());
+        verifyNoInteractions(routeService);
+    }
+
+    @Test
+    void valuesAreResolvedWhenTheRequestIsAccepted() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsProperties properties = propertiesWithPlayback(80, -30.0);
+        TtsService service = newService(properties, registryFor(properties));
+
+        service.speak(speakWith(null, null, null));
+        properties.getPlayback().setRouteVolume(10);
+
+        assertThat(routeOptionsOfTheStartedAnnouncement().getRouteVolume()).isEqualTo(80);
+    }
+
+    private TtsProperties propertiesWithPlayback(Integer routeVolume, Double duckingLevelDb) {
+        TtsProperties properties = new TtsProperties();
+        properties.setProviders(List.of(providerConfig("openai", "alloy", "en-US", "tts-1")));
+        properties.setMaxTextLength(500);
+        properties.getPlayback().setRouteVolume(routeVolume);
+        properties.getPlayback().setDuckingLevelDb(duckingLevelDb);
+        return properties;
+    }
+
+    private ProviderRegistry registryFor(TtsProperties properties) {
+        Map<String, TtsProvider> providers = Map.of("openai", openaiProvider, "piper-local", piperProvider);
+        for (Map.Entry<String, TtsProvider> entry : providers.entrySet()) {
+            TtsProviderConfig config = providerConfig(entry.getKey(), "alloy", "en-US", "tts-1");
+            when(entry.getValue().resolveSettings(any()))
+                    .thenAnswer(inv -> DefaultSettingsResolution.resolve(config, inv.getArgument(0)));
+        }
+        return new ProviderRegistry(providers, "openai");
     }
 }
