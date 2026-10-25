@@ -4,6 +4,27 @@
 
 Newest first.
 
+### 009 Announcement Route Volume And Ducking Level — archived 2026-10-25
+**Branch:** `034-route-volume-ducking-level` (named after hub feature 034)
+**Spec:** [.specify/archive/009-route-volume-ducking-level/spec.md](../archive/009-route-volume-ducking-level/spec.md)
+**Release:** `multiroom-tts` 0.1.10, requires `multiroom-api` 0.1.29 (hub feature 034)
+
+**What was added:**
+
+- `routeVolume` (0-100) and `duckingLevelDb` (-60.0 to 0.0) on `POST /api/tts/speak`; out-of-range
+  values and a level with `mix` answer 400 `INVALID_REQUEST` before synthesis
+- `playback.route-volume` and `playback.ducking-level-db` defaults, validated at start-up; the
+  ducking default is never sent for `mix`; both resolved when the request is accepted
+- The values reach the hub through `RouteService.createRoute(..., RouteOptions)`
+
+**New Components:**
+
+- No new classes: `SpeakRequest`, `AnnounceCommand`, `AnnouncementTask`, `PlaybackProperties`,
+  `TtsProperties` and `TtsService` carry two more fields
+
+**Tasks Completed:** none recorded (009 kept no tasks document; verification in its
+`verification.md`)
+
 ### 008 Answer A Malformed Target Name With 400, Not 500 — archived 2026-10-15
 **Branch:** `008-malformed-target-name`
 **Spec:** [.specify/archive/008-malformed-target-name/spec.md](../archive/008-malformed-target-name/spec.md)
