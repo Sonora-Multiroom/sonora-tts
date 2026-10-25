@@ -883,4 +883,59 @@ class TtsPropertiesValidationTest {
 
         assertThat(warnings).isEmpty();
     }
+
+    private static TtsProperties propertiesWithPlayback(PlaybackProperties playback) {
+        TtsProviderConfig piper = new TtsProviderConfig();
+        piper.setName("piper-local");
+        piper.setType(ProviderType.PIPER);
+        piper.setEnabled(false);
+        TtsProviderConfig openai = new TtsProviderConfig();
+        openai.setName("openai");
+        openai.setType(ProviderType.OPENAI);
+        openai.setApiKey("key");
+        TtsProperties properties = new TtsProperties();
+        properties.setProviders(List.of(openai));
+        properties.setPlayback(playback);
+        return properties;
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {-1, 101})
+    void abortsWhenPlaybackRouteVolumeIsOutOfRange(int value) {
+        PlaybackProperties playback = new PlaybackProperties();
+        playback.setRouteVolume(value);
+
+        assertThatThrownBy(propertiesWithPlayback(playback)::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("playback.route-volume");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(doubles = {-60.1, 0.1, Double.NaN})
+    void abortsWhenPlaybackDuckingLevelIsOutOfRange(double value) {
+        PlaybackProperties playback = new PlaybackProperties();
+        playback.setDuckingLevelDb(value);
+
+        assertThatThrownBy(propertiesWithPlayback(playback)::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("playback.ducking-level-db");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 80, 100})
+    void acceptsPlaybackRouteVolumeInRange(int value) {
+        PlaybackProperties playback = new PlaybackProperties();
+        playback.setRouteVolume(value);
+
+        propertiesWithPlayback(playback).validate();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(doubles = {-60.0, -25.0, 0.0})
+    void acceptsPlaybackDuckingLevelInRange(double value) {
+        PlaybackProperties playback = new PlaybackProperties();
+        playback.setDuckingLevelDb(value);
+
+        propertiesWithPlayback(playback).validate();
+    }
 }
