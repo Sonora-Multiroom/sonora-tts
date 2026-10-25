@@ -5,6 +5,7 @@ import multiroom.api.model.GroupId;
 import multiroom.api.model.InputId;
 import multiroom.api.model.OutputGroup;
 import multiroom.api.model.OutputId;
+import multiroom.api.model.RouteOptions;
 import multiroom.api.model.SampleFormat;
 import multiroom.api.model.TargetType;
 import multiroom.api.services.DeviceQueryService;
@@ -129,6 +130,11 @@ public class TtsService implements SmartLifecycle {
     private AnnounceResult announce(AnnounceCommand command) {
         validateText(command.text());
         PlaybackMode playbackMode = resolvePlaybackMode(command.playbackMode());
+        // Resolved now, like the mode, so a queued announcement plays with the values in force when it
+        // was requested
+        Integer routeVolume = command.routeVolume() != null
+                ? command.routeVolume() : properties.getPlayback().getRouteVolume();
+        Double duckingLevelDb = resolveDuckingLevel(playbackMode, command.duckingLevelDb());
         validateTargetExists(command.targetType(), command.targetName());
 
         String providerName = command.providerName() != null
@@ -181,7 +187,7 @@ public class TtsService implements SmartLifecycle {
         InputId inputId = InputId.of("tts-" + announcementId);
         AnnouncementTask task = new AnnouncementTask(announcementId, inputId, command.targetType(),
                 command.targetName(), audioFile, temporaryFile,
-                playbackMode, temporaryFile ? null : cacheKey);
+                playbackMode, temporaryFile ? null : cacheKey, routeVolume, duckingLevelDb);
 
         String queueKey = queueKey(command.targetType(), command.targetName());
         int queueDepth;
@@ -262,11 +268,15 @@ public class TtsService implements SmartLifecycle {
                     .autoRemove(true)
                     .build();
             deviceRegistryService.registerInput(input);
-            var joinMode = task.playbackMode().joinMode();
+            var options = RouteOptions.builder()
+                    .joinMode(task.playbackMode().joinMode())
+                    .routeVolume(task.routeVolume())
+                    .duckingLevelDb(task.duckingLevelDb())
+                    .build();
             if (task.targetType() == TargetType.SINGLE_OUTPUT) {
-                routeService.createRoute(task.inputId(), OutputId.of(task.targetName()), joinMode);
+                routeService.createRoute(task.inputId(), OutputId.of(task.targetName()), options);
             } else {
-                routeService.createRoute(task.inputId(), GroupId.of(task.targetName()), joinMode);
+                routeService.createRoute(task.inputId(), GroupId.of(task.targetName()), options);
             }
             metrics.playbackStarted();
             log.info("TTS_PLAYBACK_STARTED announcementId={} target={}", task.announcementId(), task.targetName());
@@ -315,6 +325,21 @@ public class TtsService implements SmartLifecycle {
         } else {
             log.debug("End of announcement {} was already handled", task.announcementId());
         }
+    }
+
+    /**
+     * A ducking level only means something when the announcement ducks: a request that names one for a
+     * {@code mix} announcement is refused, and the configured default is simply not sent.
+     */
+    private Double resolveDuckingLevel(PlaybackMode mode, Double requested) {
+        if (mode != PlaybackMode.DUCK_OTHERS) {
+            if (requested != null) {
+                throw new TtsException(TtsErrorCode.INVALID_REQUEST,
+                        "duckingLevelDb applies only to playbackMode " + PlaybackMode.DUCK_OTHERS.configName());
+            }
+            return null;
+        }
+        return requested != null ? requested : properties.getPlayback().getDuckingLevelDb();
     }
 
     private PlaybackMode resolvePlaybackMode(String requested) {

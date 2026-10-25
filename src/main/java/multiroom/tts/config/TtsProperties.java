@@ -74,6 +74,15 @@ public class TtsProperties {
                     + PlaybackMode.supportedList());
         }
 
+        Integer routeVolume = playback.getRouteVolume();
+        if (routeVolume != null && (routeVolume < 0 || routeVolume > 100)) {
+            throw fault("playback.route-volume must be between 0 and 100, got " + routeVolume);
+        }
+        Double duckingLevel = playback.getDuckingLevelDb();
+        if (duckingLevel != null && !(duckingLevel >= -60.0 && duckingLevel <= 0.0)) {
+            throw fault("playback.ducking-level-db must be between -60.0 and 0.0, got " + duckingLevel);
+        }
+
         Set<String> seenNames = new HashSet<>();
         Set<String> enabledNames = new HashSet<>();
         for (TtsProviderConfig provider : providers) {

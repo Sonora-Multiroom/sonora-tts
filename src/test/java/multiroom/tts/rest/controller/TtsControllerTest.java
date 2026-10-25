@@ -277,4 +277,52 @@ class TtsControllerTest {
         verify(ttsService).speak(captor.capture());
         assertThat(captor.getValue().playbackMode()).isNull();
     }
+
+    @Test
+    void routeVolumeAndDuckingLevelReachTheCommand() throws Exception {
+        when(ttsService.speak(any())).thenReturn(new AnnounceResult(UUID.randomUUID(), false, 1));
+
+        mockMvc.perform(post("/api/tts/speak")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"text":"All clear","targetName":"kitchen","targetType":"SINGLE_OUTPUT",
+                                 "routeVolume":100,"duckingLevelDb":-25.0}
+                                """))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<AnnounceCommand> captor = ArgumentCaptor.forClass(AnnounceCommand.class);
+        verify(ttsService).speak(captor.capture());
+        assertThat(captor.getValue().routeVolume()).isEqualTo(100);
+        assertThat(captor.getValue().duckingLevelDb()).isEqualTo(-25.0);
+    }
+
+    @Test
+    void omittedRouteVolumeAndDuckingLevelAreNull() throws Exception {
+        when(ttsService.speak(any())).thenReturn(new AnnounceResult(UUID.randomUUID(), false, 1));
+
+        mockMvc.perform(post("/api/tts/speak")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"text":"Hi","targetName":"kitchen","targetType":"SINGLE_OUTPUT"}
+                                """))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<AnnounceCommand> captor = ArgumentCaptor.forClass(AnnounceCommand.class);
+        verify(ttsService).speak(captor.capture());
+        assertThat(captor.getValue().routeVolume()).isNull();
+        assertThat(captor.getValue().duckingLevelDb()).isNull();
+    }
+
+    @Test
+    void routeVolumeOrDuckingLevelOutOfRangeReturns400AndSynthesizesNothing() throws Exception {
+        for (String bad : new String[]{"\"routeVolume\":101", "\"routeVolume\":-1",
+                "\"duckingLevelDb\":-60.1", "\"duckingLevelDb\":0.1"}) {
+            mockMvc.perform(post("/api/tts/speak")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"text\":\"Hi\",\"targetName\":\"kitchen\",\"targetType\":\"SINGLE_OUTPUT\"," + bad + "}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        }
+        org.mockito.Mockito.verifyNoInteractions(ttsService);
+    }
 }
