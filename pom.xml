@@ -12,7 +12,7 @@
     <parent>
         <groupId>ai.multiroom</groupId>
         <artifactId>multiroom-extension-starter</artifactId>
-        <version>0.1.21</version>
+        <version>0.1.29</version>
         <relativePath/>
     </parent>
 
