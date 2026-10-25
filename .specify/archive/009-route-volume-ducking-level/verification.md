@@ -17,8 +17,6 @@ Recorded by the hub in `sonora-multiroom/specs/034-per-route-volume-ducking/veri
 route volume 100 and ducking level -25, lowering the music to -25.0 dB and restoring it when the
 speech drained. `/actuator/extensions` showed `tts` `ACTIVE`, requiring `[0.1.29,0.2.0)`.
 
-## Not yet done
+## Release and archive
 
-- Changelog entry and moving the folder to `.specify/archive/`: `/speckit-archive-run` after merge.
-
-Version 0.1.10 (`pom.xml`), Features row added to `AGENTS.md`.
+Merged as PR #8 (`c2a04da`), tagged `v0.1.10` on 2026-10-25, archived into `.specify/memory/` the same day.

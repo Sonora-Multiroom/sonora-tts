@@ -22,6 +22,11 @@
 > **Revision**: 2026-10-15 — archived `.specify/archive/008-malformed-target-name`: a malformed target name
 > answers 400 `TARGET_NOT_FOUND` (HTTP surface), 008's design decisions, testing note and production
 > check. No dependency or configuration change; version 0.1.7.
+> **Revision**: 2026-10-25 — archived `.specify/archive/009-route-volume-ducking-level`: starter parent
+> and `multiroom.require_api_version` raised to 0.1.29 (manifest `[0.1.29,0.2.0)`), the
+> `playback.route-volume` and `playback.ducking-level-db` keys, `routeVolume` and `duckingLevelDb` on
+> the HTTP surface, 009's design decisions and testing notes, and the CI hub pin moved to a 0.1.29
+> commit; version 0.1.10.
 
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
@@ -32,7 +37,8 @@ planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension
 `005-tts-metrics` [Source: .specify/archive/005-tts-metrics/plan.md],
 `006-announcement-ducking` [Source: .specify/archive/006-announcement-ducking/plan.md],
 `007-failed-start-cleanup` [Source: .specify/archive/007-failed-start-cleanup/plan.md] and
-`008-malformed-target-name` [Source: .specify/archive/008-malformed-target-name/plan.md].
+`008-malformed-target-name` [Source: .specify/archive/008-malformed-target-name/plan.md] and
+`009-route-volume-ducking-level` [Source: .specify/archive/009-route-volume-ducking-level/plan.md].
 
 ## Shape
 
@@ -40,8 +46,8 @@ A single Maven module producing one shaded JAR, `multiroom-tts.jar`, dropped int
 `extensions/` directory.
 
 ```text
-pom.xml                    # parent: ai.multiroom:multiroom-extension-starter:0.1.21 (since 006),
-                           #   <relativePath/> EMPTY; multiroom.require_api_version 0.1.21
+pom.xml                    # parent: ai.multiroom:multiroom-extension-starter:0.1.29 (since 009),
+                           #   <relativePath/> EMPTY; multiroom.require_api_version 0.1.29
 src/main/java/multiroom/tts/
 ├── TtsAutoConfiguration.java  # the entry point — @AutoConfiguration,
 │                              #   @ConditionalOnProperty("multiroom.tts.enabled", matchIfMissing),
@@ -53,7 +59,8 @@ src/main/java/multiroom/tts/
 │                              #   validation live here; ProviderType.configName() (005: the
 │                              #   configuration spelling, also the `type` metric tag);
 │                              #   006: PlaybackMode (DUCK_OTHERS|MIX, fromName, configName,
-│                              #   joinMode) and PlaybackProperties (playback.default-mode)
+│                              #   joinMode) and PlaybackProperties (playback.default-mode; 009: route-volume,
+│                              #   ducking-level-db)
 ├── metrics/                   # 005: TtsMetrics (the event seam), MicrometerTtsMetrics (the ONLY
 │                              #   class importing io.micrometer: meters, tag rules, buckets, cache
 │                              #   and queue gauges), NoopTtsMetrics, SynthesisUsage (the work one
@@ -113,7 +120,7 @@ The manifest, written by the inherited parent POM, carries `Extension-Id: tts`,
 
 | Dependency | Scope | Why |
 |---|---|---|
-| `multiroom-api` 0.1.21 | `provided` (from the parent) | The whole contract: routing, device registry, `TargetType`, `RouteDestroyedEvent`, `FormatConverter`; since 006 `RouteJoinMode`, `RouteAdmissionException` and the three-argument `createRoute` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"] |
+| `multiroom-api` 0.1.29 | `provided` (from the parent) | The whole contract: routing, device registry, `TargetType`, `RouteDestroyedEvent`, `FormatConverter`; since 006 `RouteJoinMode`, `RouteAdmissionException` and the three-argument `createRoute` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"]; since 009 `RouteOptions` and the `RouteOptions` overloads of `createRoute` [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", pom.xml row] |
 | `spring-boot-starter-web`, `-validation`, Jackson | `provided` | Supplied by the host at runtime; bundling risks a class collision with another extension |
 | `spring-boot-configuration-processor` | `provided`, optional | Configuration metadata for `multiroom.tts.*` |
 | `swagger-annotations-jakarta` 2.2.47 | `provided` | `@Operation` / `@ApiResponse` for springdoc; pinned to the copy `multiroom-rest` ships, never bundled |
@@ -131,7 +138,9 @@ The manifest, written by the inherited parent POM, carries `Extension-Id: tts`,
 Guava and its own HTTP transport onto the shared classpath. 006 added no dependency either, but
 raised the starter parent and `multiroom.require_api_version` to 0.1.21 together, so the manifest
 reads `Require-API-Version: [0.1.21,0.2.0)` and a host without multiroom-ai 023 refuses the JAR;
-deploy the host first [Source: .specify/archive/006-announcement-ducking/research.md -> R8].
+deploy the host first [Source: .specify/archive/006-announcement-ducking/research.md -> R8]. 009 raised
+both again to 0.1.29 (manifest `Require-API-Version: [0.1.29,0.2.0)`) for `RouteOptions`; the host
+needs multiroom-ai 034 [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", pom.xml row].
 
 ## Configuration
 
@@ -152,6 +161,8 @@ deploy the host first [Source: .specify/archive/006-announcement-ducking/researc
 | `cache.max-size-mb` | 500 | LRU above it |
 | `queue.max-depth-per-target` | 10 | |
 | `playback.default-mode` | `duck-others` | Since 006: the playback mode of every announcement whose request names none; `duck-others` or `mix`, case-insensitive; one value for the whole extension. Bound as a `String` and checked in `TtsProperties.validate()`; anything else (`replace` included) aborts start-up: `multiroom-tts: playback.default-mode '<v>' is not one of duck-others, mix` [Source: .specify/archive/006-announcement-ducking/contracts/configuration.md -> "`multiroom.tts.playback`"] |
+| `playback.route-volume` | unset | Since 009: volume 0-100 of every announcement whose request names none; replaces the target outputs' volume for the announcement only. Bound as `Integer`; outside 0-100 aborts start-up in `TtsProperties.validate()` [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", PlaybackProperties row] |
+| `playback.ducking-level-db` | unset | Since 009: ducking level in dB, -60.0 to 0.0, for `duck-others` announcements whose request names none; never sent for `mix`. Bound as `Double`; outside the range aborts start-up [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", PlaybackProperties row] |
 | `voice-catalogue.ttl` | `24h` | Per Google entry's own catalogue (`google-gemini` too, since 004) |
 | `voice-catalogue.failure-backoff` | `60s` | No refetch after a failure for this long; also the minimum age before a miss refetches. Since 003, also the token service's back-off |
 | `voice-catalogue.fetch-timeout` | `3s` | Cap on one fetch, inside the entry's `timeout-seconds` |
@@ -215,7 +226,11 @@ optional `stylePrompt` (`google-gemini` only), and listed voices gain `gender`. 
 endpoint and no code: `POST /api/tts/speak` takes an optional `playbackMode` (`duck-others` or
 `mix`, case-insensitive; anything else is 400 `INVALID_REQUEST` before the cache lookup and any
 synthesis, and not part of the cache identity); the response is unchanged
-[Source: .specify/archive/006-announcement-ducking/plan.md -> "HTTP"].
+[Source: .specify/archive/006-announcement-ducking/plan.md -> "HTTP"]. 009 added no endpoint and no code
+either: `POST /api/tts/speak` takes an optional `routeVolume` (0-100) and `duckingLevelDb` (-60.0 to
+0.0, `duck-others` only); a value out of range, or a level with `mix`, is 400 `INVALID_REQUEST`
+before the target lookup and any synthesis, and neither is part of the cache identity
+[Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", SpeakRequest row]. The published REST contract file stays 006's v0.1.5.
 
 Deliberately not under `/api/v2/**` (`multiroom-rest`'s contract with `sonora-cli` and
 `sonora-mcp`), and deliberately not RFC 7807 for the same reason. Current contract, versioned with
@@ -535,6 +550,21 @@ operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
   `INVALID_REQUEST` with provider `unknown`; the regex would copy the hub's `DomainId` rule here,
   where it drifts unnoticed. The OpenAPI description states the rule instead
 
+[Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Decisions"]
+
+- **One resolution point** (009): `TtsService.announce` resolves request value, then configured
+  default, once, when the request is accepted, and carries the result in `AnnouncementTask`, so a
+  queued announcement keeps the values in force at request time. The mix check cannot be Bean
+  Validation (it depends on the default mode), so `resolveDuckingLevel` in `TtsService` refuses a
+  requested level with `mix` and drops a configured one
+- **Same bounds as the hub**: `SpeakRequest` uses `@Min`/`@Max`/`@DecimalMin`/`@DecimalMax` with
+  the numbers `RouteOptions` enforces, so a value the extension accepts the hub accepts; a
+  configured default is checked in `TtsProperties.validate()` like `default-mode`
+- **Old constructor shapes kept**: `AnnounceCommand` and `AnnouncementTask` keep their earlier
+  constructors, passing `null`, so existing callers and tests are unchanged
+- **CI pin**: the workflow builds `multiroom-api` and the starter from the hub at the last commit of
+  the pom's parent version; raising the parent to 0.1.29 moved `HUB_REF` with it
+
 ## Testing strategy
 
 Unit and slice tests only; nothing boots the host.
@@ -591,6 +621,11 @@ Unit and slice tests only; nothing boots the host.
   `TtsServiceTest.aNameThatIsNotAValidIdRaisesTargetNotFound` for an output and a group. The test
   classpath has no `multiroom-rest`, so no test here ever ran with the hub's global advice — the
   500 was invisible to the suite until a test asserted the code itself
+- Route volume and ducking level (009) [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Testing"]: `TtsPropertiesValidationTest` (default
+  ranges, in and out), `TtsControllerTest` (fields reach `AnnounceCommand`; out-of-range answers
+  400 and synthesizes nothing), `TtsServiceTest` (options reach both `createRoute` overloads,
+  request over default, `mix` sends no level, `mix` with a level refused before synthesis, values
+  resolved at acceptance). The end-to-end route read-back was done by the hub (2026-10-24)
 - JaCoCo's 80 % floor fails `mvn verify`
 
 ## Build, deploy, verify

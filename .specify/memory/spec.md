@@ -20,6 +20,12 @@
 > the hub's ID rule answers 400 `TARGET_NOT_FOUND` — 001/FR-010 annotated, the "Unknown target"
 > edge case extended, a 0.1.7 paragraph under "Current state". 008 states no stories, numbered
 > requirements, success criteria or assumptions, so none were added.
+> **Revision**: 2026-10-25 — archived `.specify/archive/009-route-volume-ducking-level`: a speak
+> request may name its own volume and ducking level — 009/R1–R8 (request fields, their 400s, the
+> `tts.playback` defaults and when they apply, API 0.1.29), the `Speak request` and `Playback
+> settings` entities, three edge cases, three success criteria, an out-of-scope line, host
+> coupling raised to API 0.1.29 and a 0.1.10 paragraph under "Current state". 009 states no
+> stories or assumptions, so none were added.
 
 **Scope**: one extension for the multiroom audio system — text-to-speech announcements delivered to a
 room or a group of rooms.
@@ -62,6 +68,8 @@ the room and restored it afterwards)* [Source: .specify/archive/006-announcement
 - Not an audio-processing component: format conversion is delegated to the host's shared
   `FormatConverter`. This module implements no resampling, channel mixing or bit-depth conversion
 - Not MQTT-triggered (deferred; it needs a cross-extension mechanism that is out of scope)
+- Not a way to change the volume of an announcement that is already playing: hub 034 offers that on
+  routes, and this extension does not expose it [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> "Out of scope"]
 
 ## Current state
 
@@ -122,6 +130,14 @@ hub 026 removed its global exception mapper, a `targetName` breaking the hub's I
 room"`) escaped as a 500 counted as `INTERNAL`. It now answers 400 `TARGET_NOT_FOUND` in the
 contract's `ErrorResponse` shape and is counted under that code. No API bump (still 0.1.21), no new
 code or field [Source: .specify/archive/008-malformed-target-name/spec.md -> "Proposal"].
+
+**Announcement volume and ducking level** in 0.1.10 by `009-route-volume-ducking-level` (archived
+here 2026-10-25): hub feature 034 (multiroom-api 0.1.29) lets a route carry its own volume and
+ducking level, so a speak request may name `routeVolume` (0-100, this announcement only, so the
+room's volume control does not reach it) and, with `duck-others`, `duckingLevelDb` (-60.0 to
+0.0), with `playback.route-volume` and `playback.ducking-level-db` as defaults. Requires
+multiroom-api 0.1.29. No new endpoint or error code
+[Source: .specify/archive/009-route-volume-ducking-level/spec.md -> "Problem", R1, R2, R4].
 
 Features in progress live under [specs/](../../specs/) until they are archived here.
 
@@ -529,6 +545,17 @@ the archived spec behind an ID for its full wording.
   present (even empty or whitespace) sent to another type is a 400 naming the field and the type
 - **001/FR-027** Structured log events: request received, cache hit/miss, synthesis
   started/completed/error, playback started/completed
+- **009/R1** A request may carry `routeVolume`, an integer 0-100: the volume of this announcement
+  only. It replaces the target outputs' volume for the announcement and changes no output's
+  volume, so the room's volume control does not reach it
+  [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R1]
+- **009/R2** A request may carry `duckingLevelDb`, a number from -60.0 to 0.0: how far a
+  `duck-others` announcement lowers what else plays on the target
+  [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R2]
+- **009/R3** A `routeVolume` or `duckingLevelDb` out of range, or a `duckingLevelDb` when the
+  effective playback mode is `mix`, answers 400 `INVALID_REQUEST` before anything is synthesized
+  or queued; a request naming neither is unchanged
+  [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R3]
 
 ### Providers
 
@@ -889,6 +916,23 @@ the unreadable-body answer noted under 001/FR-032.
   [Source: .specify/archive/007-failed-start-cleanup/spec.md -> FR-008]
 - **001/FR-024** Shutdown lets the current announcement finish and discards the queue.
   `enabled=false` is a start-up state, never a runtime transition
+- **009/R4** `multiroom.tts.playback.route-volume` and `multiroom.tts.playback.ducking-level-db` are
+  optional defaults for a request that names none; a request value wins. A default outside its
+  range aborts start-up naming the key, and is skipped when `multiroom.tts.enabled=false`
+  [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R4]
+- **009/R5** The configured ducking default applies only to a `duck-others` announcement; for
+  `mix` no level is sent. An explicit request level with `mix` is a caller error (009/R3), a
+  configured default is not
+  [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R5]
+- **009/R6** Both values are resolved when the request is accepted, as the playback mode is, so a
+  queued announcement plays with the values in force when it was requested
+  [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R6]
+- **009/R7** A value left unset anywhere is not sent, so the hub's own defaults apply: the
+  outputs' volume, and the input's then the system's ducking level
+  [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R7]
+- **009/R8** The extension requires `multiroom-api` 0.1.29 (`multiroom.require_api_version`); the
+  values reach the hub through `RouteService.createRoute(..., RouteOptions)`
+  [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R8]
 
 ### Cache
 
@@ -921,7 +965,9 @@ the unreadable-body answer noted under 001/FR-032.
   (`google-cloud` only) engine / pitch, (both Google types) speaking rate, and (`google-gemini`
   only, since 004) style prompt. Since 006 also an optional `playbackMode` (a `String`, `null` = not
   given); an unknown value is `INVALID_REQUEST` before target lookup, cache lookup or synthesis
-  [Source: .specify/archive/006-announcement-ducking/data-model.md -> "SpeakRequest / AnnounceCommand"]
+  [Source: .specify/archive/006-announcement-ducking/data-model.md -> "SpeakRequest / AnnounceCommand"].
+  Since 009 also an optional `routeVolume` (`Integer`, 0-100) and `duckingLevelDb` (`Double`,
+  -60.0 to 0.0), each `null` = not given [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R1, R2]
 - **Provider configuration** — name, type, credentials, default voice and language, engine,
   timeout, and (Google only) pitch and speaking rate; since 004, `model` and `style-prompt`
   (`google-gemini` only). The list plus `default-provider` under `multiroom.tts`. Since 002,
@@ -972,7 +1018,9 @@ the unreadable-body answer noted under 001/FR-032.
   [Source: .specify/archive/006-announcement-ducking/data-model.md -> "PlaybackMode (new enum, `multiroom.tts.config`)"]
 - **Playback settings** *(006)* — configuration: the default playback mode for every announcement
   (`multiroom.tts.playback.default-mode`, `duck-others`), validated at start-up and skipped when
-  `multiroom.tts.enabled=false` [Source: .specify/archive/006-announcement-ducking/spec.md -> "Playback settings"]
+  `multiroom.tts.enabled=false` [Source: .specify/archive/006-announcement-ducking/spec.md -> "Playback settings"].
+  Since 009 also `playback.route-volume` (0-100) and `playback.ducking-level-db` (-60.0 to 0.0),
+  both unset by default and validated at start-up [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R4]
   [Source: .specify/archive/006-announcement-ducking/data-model.md -> "PlaybackProperties (new, `multiroom.tts.playback`)"]
 - **Announcement in flight** *(007)* — an announcement taken off its target's queue whose end has
   not yet been handled. It ends exactly once, with one outcome: completed (it started) or failed (it
@@ -1182,6 +1230,13 @@ the provider call (conversion outside the timing), and the playback start is cou
 - *(007)* A failure before the route step (registering the input or tracking the announcement
   fails): counted once as a failed playback, as before 007
   [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "A failure before the route step"]
+- *(009)* A request names `duckingLevelDb` while the effective mode is `mix` (requested, or the
+  configured default): 400 `INVALID_REQUEST` before the target lookup, any cache lookup or
+  synthesis, and nothing is queued [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R3]
+- *(009)* A configured `playback.ducking-level-db` with a `mix` announcement: not an error; no
+  level is sent [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R5]
+- *(009)* The configured defaults change while an announcement waits in the queue: it plays with
+  the values in force when it was accepted [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R6]
 
 ## Success criteria
 
@@ -1244,6 +1299,9 @@ repository boots the host.
 | 007/SC-002 one end per announcement | in each of four cases (completed, refused, admitted-but-failed on a current hub, failed on an older hub) the queue is told once and one outcome is counted | Unit-tested (`TtsServiceTest`, `PlaybackCompletionListenerTest`) |
 | 007/SC-003 counters add up | started + failed = announcements taken off their queues | Unit-tested; on production after the 0.1.6 deploy one normal announcement gave `started` 1 and no `failed` series |
 | 007/SC-004 no regression | refused and completed announcements produce the same lines, counts and queue signals as before 007 | Unit-tested; one normal announcement on production logged STARTED and COMPLETED once each |
+| 009 one `createRoute` call | a request with both fields reaches the hub as one `createRoute` call whose `RouteOptions` carry the join mode, the volume and the level | Unit-tested (`TtsServiceTest`) |
+| 009 refusals and faults | out-of-range values and a level with `mix` answer 400 before synthesis; out-of-range defaults abort start-up | Unit-tested (`TtsControllerTest`, `TtsServiceTest`, `TtsPropertiesValidationTest`) |
+| 009 live route | with hub 034 a route started by an announcement reads back with both values | Recorded by the hub on 2026-10-24 (route volume 100, level -25 dB over a playing stream); not repeated in this repository |
 
 Sources for the 005 rows: [.specify/archive/005-tts-metrics/spec.md -> SC-001–SC-007], status from
 [.specify/archive/005-tts-metrics/tasks.md -> T041, T047, T048].
@@ -1253,6 +1311,8 @@ Sources for the 006 rows: [.specify/archive/006-announcement-ducking/spec.md -> 
 recorded in the pull request, not in the feature's artifacts.
 Sources for the 007 rows: [.specify/archive/007-failed-start-cleanup/spec.md -> SC-001–SC-004], status from
 [.specify/archive/007-failed-start-cleanup/verification.md].
+Sources for the 009 rows: [.specify/archive/009-route-volume-ducking-level/spec.md -> "Success criteria"], status from
+[.specify/archive/009-route-volume-ducking-level/verification.md].
 
 ## Assumptions
 
@@ -1345,8 +1405,9 @@ Sources for the 007 rows: [.specify/archive/007-failed-start-cleanup/spec.md -> 
 
 ## Host coupling
 
-Built against `multiroom-api` **0.1.21** since 006 (0.1.18 before; 006 needs its join modes and
-`RouteAdmissionException`) [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"],
+Built against `multiroom-api` **0.1.29** since 009 (0.1.21 since 006, 0.1.18 before; 009 needs
+`RouteOptions` and the options overload of `createRoute`) [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R8]; 006 needed its join modes and
+`RouteAdmissionException` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"],
 resolved from the local `~/.m2`; the host repository is
 `D:\projects-multiroom\multiroom-ai`. The required version is pinned in `pom.xml` and advertised in
 the JAR manifest as `Require-API-Version`. See the Upstream Contract in
