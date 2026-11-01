@@ -111,7 +111,7 @@ moves from `specs/` to `.specify/archive/`.
 | `007-failed-start-cleanup` | An announcement that fails to start ends once, as `TTS_PLAYBACK_FAILED`, with one queue signal: the listener leaves a destroyed route that never went live (`startedAt == null`) to the failure path, `cancel` reports whether it removed the entry, and `abandon` signals the queue only then. No API bump (still 0.1.21) | 0.1.6 | [.specify/archive/007-failed-start-cleanup/](.specify/archive/007-failed-start-cleanup/) |
 | `008-malformed-target-name` | A `targetName` that breaks the hub's ID rule (`"living room"`) answers 400 `TARGET_NOT_FOUND` instead of escaping as a 500 once hub 026 removed the global v1 exception mapper; only the ID construction is caught; the rule is stated in the OpenAPI description. No API bump (still 0.1.21) | 0.1.7 | [.specify/archive/008-malformed-target-name/](.specify/archive/008-malformed-target-name/) |
 | `009-route-volume-ducking-level` | `routeVolume` and `duckingLevelDb` on a speak request, and `playback.route-volume` / `playback.ducking-level-db` defaults, reach the hub through `RouteService.createRoute(…, RouteOptions)`; a level with `mix` is 400. Requires multiroom-api 0.1.29 (hub feature 034) | 0.1.10 | [.specify/archive/009-route-volume-ducking-level/](.specify/archive/009-route-volume-ducking-level/) |
-| `010-cache-warm-without-playback` | `POST /api/tts/cache/warm` stores a phrase's audio without playing it, so a later speak is a cache hit with no provider call; a hit is free and counts as just used; a failed store answers `CACHE_WRITE_FAILED` (503) with no temp-file fallback; `tts_cache_warm_total`, separate from announcement metrics. No API bump (still 0.1.29) | 0.1.11 | [specs/010-cache-warm-without-playback/](specs/010-cache-warm-without-playback/) |
+| `010-cache-warm-without-playback` | `POST /api/tts/cache/warm` stores a phrase's audio without playing it, so a later speak is a cache hit with no provider call; a hit is free and counts as just used; a failed store answers `CACHE_WRITE_FAILED` (503) with no temp-file fallback; `tts_cache_warm_total`, separate from announcement metrics. No API bump (still 0.1.29) | 0.1.11 | [.specify/archive/010-cache-warm-without-playback/](.specify/archive/010-cache-warm-without-playback/) |
 
 Add a row when a feature merges, and change its path when it is archived.
 
@@ -244,6 +244,15 @@ interface is added to that list.
 `python3 -m piper`. The interpreter is normally a bare `PATH`-resolved command.
 **Prevention Rule:** Validate `model-path` and its `.onnx.json` sidecar for existence; never
 path-check or spawn `python-executable` during start-up.
+
+### ⚠️ A Cache `put` Can Return A Path To A File It Already Evicted
+**Issue:** A warm-up answers success, yet the phrase is not in the cache.
+**Root Cause:** `FilesystemAudioCache.evictIfNeeded` walks the whole index, so an entry larger than the
+cap, or a new entry in a cache otherwise full of pinned entries, is evicted by its own `put`, which
+still returns the path. An announcement does not notice until activation.
+**Prevention Rule:** After `put`, `TtsService.warm` checks that the returned path exists and answers
+`CACHE_WRITE_FAILED` if not. Keep that check, and never report a warm-up as stored on the strength of
+`put` returning.
 
 ### ⚠️ `extension.id` Is Not Derived From The Artifact Id
 **Issue:** The extension loads but its enable/disable switch does nothing, or the inventory reports

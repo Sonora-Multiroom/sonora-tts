@@ -26,6 +26,11 @@
 > settings` entities, three edge cases, three success criteria, an out-of-scope line, host
 > coupling raised to API 0.1.29 and a 0.1.10 paragraph under "Current state". 009 states no
 > stories or assumptions, so none were added.
+> **Revision**: 2026-11-01 — archived `.specify/archive/010-cache-warm-without-playback`: warming the
+> cache without playback — four stories (full blocks under "Story details"), 010/FR-001–FR-017
+> (request, cache, silence, answer, observability), the `Warm-up request` and `Warm-up count`
+> entities, seven edge cases, seven success criteria, AS-022–AS-026, an out-of-scope line and a
+> 0.1.11 paragraph under "Current state". No pre-existing entry was folded into or removed.
 
 **Scope**: one extension for the multiroom audio system — text-to-speech announcements delivered to a
 room or a group of rooms.
@@ -70,6 +75,10 @@ the room and restored it afterwards)* [Source: .specify/archive/006-announcement
 - Not MQTT-triggered (deferred; it needs a cross-extension mechanism that is out of scope)
 - Not a way to change the volume of an announcement that is already playing: hub 034 offers that on
   routes, and this extension does not expose it [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> "Out of scope"]
+- Not a way to keep an entry in the cache: a warmed entry is evicted by least recent use like any
+  other, and a caller keeps it by warming again. Also out of scope: a batch warm-up request and a
+  fallback to another provider during an outage
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Assumptions"]
 
 ## Current state
 
@@ -139,6 +148,16 @@ room's volume control does not reach it) and, with `duck-others`, `duckingLevelD
 multiroom-api 0.1.29. No new endpoint or error code
 [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> "Problem", R1, R2, R4].
 
+**Cache warm-up** in 0.1.11 by `010-cache-warm-without-playback` (archived here 2026-11-01): until now
+the only way to cache an announcement was to play it, yet the announcements that matter most are
+needed when a cloud provider cannot be reached. `POST /api/tts/cache/warm` takes a speak body's text
+and voice fields, synthesizes and stores the audio and plays nothing; a later speak of the same text
+and resolved settings is a hit on any target. A stored phrase is a free hit that counts as just used,
+so a caller keeps its list ahead of eviction by re-warming it on a schedule. A store that failed
+answers the new code `CACHE_WRITE_FAILED` (503). Warm-ups have their own metric,
+`tts_cache_warm_total`. No new hub API (still multiroom-api 0.1.29)
+[Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "User Scenarios", FR-001, FR-010, FR-012, FR-014].
+
 Features in progress live under [specs/](../../specs/) until they are archived here.
 
 ## User stories
@@ -175,11 +194,15 @@ Features in progress live under [specs/](../../specs/) until they are archived h
 | A failed start is reported once, as a failure | P1 | An announcement whose route is admitted and fails to start logs one failure line and no completion, counts one failed and no started playback, and leaves no input registered and no warning | 007 |
 | The queue moves on exactly once | P1 | After a failed start the queue is told once that it ended, the next announcement plays, and nothing is held for the failed one | 007 |
 | Refusals and normal playback are unchanged | P2 | A refused and a normally completed announcement log, count and signal the queue exactly as before 007 | 007 |
+| Prepare an announcement silently | P1 | A phrase warmed through `POST /api/tts/cache/warm` is stored with nothing played, queued or pinned; a speak of it on any target is a cache hit, even with the provider unreachable | 010 |
+| Re-warm on a schedule at no cost | P1 | A warm-up of a stored phrase is free (no provider call) and counts as just used; an evicted or never-stored one is synthesized; repeating a half-finished list sends the provider only the missing phrases | 010 |
+| Know that a warm-up failed | P2 | A warm-up that stored nothing answers an error: the provider code as for speak, `CACHE_WRITE_FAILED` for a cache that cannot hold the entry, or a speak-style 400 before any synthesis | 010 |
+| Watch warm-ups apart from announcements | P3 | `tts_cache_warm_total` counts every answered warm-up by outcome, error and provider, apart from the announcement and cache lookup counts; a miss still adds to the synthesis metrics | 010 |
 
 Sources: [001](../archive/001-tts-extension/spec.md), [002](../archive/002-google-voice-selection/spec.md),
 [003](../archive/003-google-service-account-auth/spec.md), [004](../archive/004-gemini-tts-provider/spec.md),
 [005](../archive/005-tts-metrics/spec.md), [006](../archive/006-announcement-ducking/spec.md),
-[007](../archive/007-failed-start-cleanup/spec.md).
+[007](../archive/007-failed-start-cleanup/spec.md), [010](../archive/010-cache-warm-without-playback/spec.md).
 
 ### Story details
 
@@ -496,6 +519,101 @@ logs, counters and queue signals with the behaviour before 007.
    **Then** `TTS_PLAYBACK_STARTED` and `TTS_PLAYBACK_COMPLETED` are logged, one started playback
    is counted, and the queue is told once.
 
+#### Prepare an announcement silently (Priority: P1)
+
+[Source: .specify/archive/010-cache-warm-without-playback/spec.md -> User Story 1]
+
+A home automation prepares a phrase it may need later, such as "The power is expected back at half
+past two", while the network is up. The audio is synthesized and stored, and nothing plays in any
+room. When a power outage takes the internet down, the same phrase, spoken as an ordinary
+announcement, plays from the stored audio with no provider involved.
+
+**Why this priority**: This is the feature. Today the only way to store an announcement is to play
+it aloud, and the announcements that matter most are the ones needed when a cloud provider cannot
+be reached.
+
+**Independent Test**: Warm a phrase, confirm no playback started, make the provider unreachable,
+speak the same phrase and confirm it is served from the cache.
+
+**Acceptance Scenarios**:
+
+1. **Given** a phrase that is not cached, **When** it is warmed, **Then** the provider synthesizes
+   it once, the audio is stored, the answer reports `cacheHit: false`, and no input, route or queue
+   entry is created.
+2. **Given** a warmed phrase, **When** it is spoken with the same text, provider and settings on
+   any target, **Then** it is a cache hit and the provider is not contacted.
+3. **Given** a warmed phrase and an unreachable provider, **When** it is spoken, **Then** it plays.
+4. **Given** a request that spells its settings differently from the later speak but resolves to
+   the same ones, or relies on the entry's defaults, **When** the phrase is spoken, **Then** it is a
+   cache hit.
+
+#### Re-warm on a schedule at no cost (Priority: P1)
+
+[Source: .specify/archive/010-cache-warm-without-playback/spec.md -> User Story 2]
+
+The automation warms its whole list of phrases regularly. Phrases already stored cost nothing and
+count as recently used, so they stay ahead of eviction, and any phrase that was evicted or never
+stored is synthesized again. A run that stopped half way can simply be repeated.
+
+**Why this priority**: The cache is an ordinary least-recently-used cache, and an outage may come
+months after a phrase was last spoken. A free, repeatable warm-up is what keeps the phrases there
+without a separate "keep" mechanism.
+
+**Independent Test**: Warm a phrase twice and confirm the second answer is a hit with no provider
+call and a refreshed last-used time.
+
+**Acceptance Scenarios**:
+
+1. **Given** a cached phrase, **When** it is warmed, **Then** the answer reports `cacheHit: true`,
+   the provider is not contacted, and the entry counts as just used.
+2. **Given** an entry that was evicted or cleared, **When** it is warmed, **Then** it is
+   synthesized and stored again.
+3. **Given** a run that failed part way through a list, **When** the whole list is warmed again,
+   **Then** only the phrases still missing reach the provider.
+
+#### Know that a warm-up failed (Priority: P2)
+
+[Source: .specify/archive/010-cache-warm-without-playback/spec.md -> User Story 3]
+
+The automation is told plainly when a phrase was not stored, so it can retry rather than discover
+the gap during an outage.
+
+**Why this priority**: A warm-up has one purpose. Reporting success without a stored entry would
+hide the failure until the moment the phrase is needed.
+
+**Independent Test**: Make the provider fail, and separately make the cache unwritable, and confirm
+each answers an error and leaves nothing behind.
+
+**Acceptance Scenarios**:
+
+1. **Given** a provider that times out, is rate limited or fails, **When** a phrase is warmed,
+   **Then** the answer is the same error a speak request gets, and it is not retried.
+2. **Given** an unwritable cache, **When** a phrase is synthesized for a warm-up, **Then** the answer
+   is an error naming the cache failure, and no temporary audio file is left behind.
+3. **Given** a blank or over-long text, an unknown provider, or a setting the provider rejects,
+   **When** it is warmed, **Then** it is refused as a speak request would be, before any synthesis.
+
+#### Watch warm-ups apart from announcements (Priority: P3)
+
+[Source: .specify/archive/010-cache-warm-without-playback/spec.md -> User Story 4]
+
+An operator reads the extension's metrics and can tell warm-ups from announcements: the announcement
+counts and the cache hit ratio still describe what was played, while the cost of warming stays
+visible.
+
+**Why this priority**: A scheduled re-warm would otherwise distort the hit ratio with hundreds of
+hits nobody heard, but the feature works without this.
+
+**Independent Test**: Run a warm-up and confirm the warm-up count rises, the announcement counts and
+cache lookup counts do not, and a miss adds to the characters sent to the provider.
+
+**Acceptance Scenarios**:
+
+1. **Given** any warm-up, **When** it is answered, **Then** the warm-up count rises by one with its
+   outcome, and no announcement, cache lookup, queue or playback count changes.
+2. **Given** a warm-up that reaches the provider, **When** it finishes, **Then** synthesis time,
+   characters and audio produced are recorded as for an announcement.
+
 ## Requirements
 
 IDs belong to the feature that defined them and are cited as `NNN/FR-nnn` (`001/FR-008`,
@@ -556,6 +674,27 @@ the archived spec behind an ID for its full wording.
   effective playback mode is `mix`, answers 400 `INVALID_REQUEST` before anything is synthesized
   or queued; a request naming neither is unchanged
   [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R3]
+- **010/FR-001** The extension offers `POST /api/tts/cache/warm`, one text per request, with the speak request's `text`,
+  `providerName`, `voice`, `language`, `engine`, `pitch`, `speakingRate` and `stylePrompt`
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-001]
+- **010/FR-002** A warm-up needs no target and checks that no output or group exists
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-002]
+- **010/FR-003** Text, provider and settings are validated exactly as for a speak request, with the same
+  error codes, before any synthesis
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-003]
+- **010/FR-004** `POST /api/tts/speak` keeps its contract: same fields, same validation, same `202`
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-004]
+- **010/FR-010** A successful warm-up answers `200` with `{ "cacheHit": true|false }` once the entry is stored,
+  and no announcement id or queue depth
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-010]
+- **010/FR-011** A provider failure answers as for a speak request, with no automatic retry; the provider timeout
+  applies unchanged
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-011]
+- **010/FR-013** The REST contract and the operator documentation describe the endpoint, the new code and the
+  caller's rules: warm the exact text that is later spoken, warm again after changing a voice,
+  language, style prompt or default provider, name the provider, and pace requests, because the
+  extension has no rate limiter
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-013]
 
 ### Providers
 
@@ -829,6 +968,18 @@ the unreadable-body answer noted under 001/FR-032.
   from git, so not part of the pull request) says what 005 provides (the definition, the
   measurement point, the tier breakdown, the visibility) and what the budget feature still needs
   (persisted monthly totals, a limit per entry, and the choice between rejecting and falling back)
+- **010/FR-014** Every answered warm-up is counted exactly once in a new metric, by a configured provider or
+  `unknown` and by outcome (`hit`, `synthesized`, `failed`), with an error tag on the announcement
+  metric's rules; a request refused before the service counts too
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-014]
+- **010/FR-015** A warm-up changes no announcement, cache lookup, queue or playback metric and adds no tag to an
+  existing metric
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-015]
+- **010/FR-016** A warm-up that reaches the provider records synthesis time, characters and audio produced as an
+  announcement does, because the provider bills it
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-016]
+- **010/FR-017** Warm-ups are logged as structured events carrying the text length and provider, never the text
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-017]
 
 ### Playback
 
@@ -953,6 +1104,25 @@ the unreadable-body answer noted under 001/FR-032.
   deleted afterwards, with a warning
 - **006/FR-011** The playback mode is not part of the cache key: the same text in another mode is
   the same audio and is a cache hit [Source: .specify/archive/006-announcement-ducking/spec.md -> FR-011]
+- **010/FR-005** A warm-up identifies the audio exactly as a speak request does, so a speak with the same text,
+  provider and resolved settings is a hit on any target; playback fields and the target are not part
+  of that identity
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-005]
+- **010/FR-006** A cached phrase is marked as just used, the provider is not contacted, and the answer needs no
+  network work
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-006]
+- **010/FR-007** An uncached phrase is synthesized, converted to the format of an announcement and stored as an
+  ordinary cache entry
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-007]
+- **010/FR-008** A warmed entry behaves as any other: evicted by least recent use, removed by a cache clear, counted
+  in the cache statistics. There is no way to keep an entry
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-008]
+- **010/FR-009** A warm-up creates no announcement, input, route, queue entry or cache hold, and affects nothing
+  playing or queued other than through ordinary eviction
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-009]
+- **010/FR-012** A failed cache write answers the new published code `CACHE_WRITE_FAILED` as a `503`. Unlike an
+  announcement, a warm-up does not fall back to a temporary file
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-012]
 
 ## Key entities
 
@@ -1052,6 +1222,12 @@ the unreadable-body answer noted under 001/FR-032.
   [Source: .specify/archive/005-tts-metrics/spec.md -> "Queue depth"]
 - **Playback count** *(005)* — how many dequeued announcements started playing or failed to
   [Source: .specify/archive/005-tts-metrics/spec.md -> "Playback count"]
+- **Warm-up request** *(010)* — one text with optional provider and voice settings; no target and no
+  playback settings. Not stored anywhere once answered. The answer is `cacheHit`: already stored, or
+  stored now [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Key Entities"]
+- **Warm-up count** *(010)* — how many warm-up requests were answered, by outcome (`hit`,
+  `synthesized`, `failed`), error code and provider, apart from the announcement and cache lookup
+  counts [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> FR-014, FR-015]
 
 ## Request lifecycle
 
@@ -1237,6 +1413,25 @@ the provider call (conversion outside the timing), and the playback start is cou
   level is sent [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R5]
 - *(009)* The configured defaults change while an announcement waits in the queue: it plays with
   the values in force when it was accepted [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R6]
+- *(010)* Two warm-ups, or a warm-up and a speak, of one uncached phrase at the same moment: both may
+  synthesize, as two identical speak requests do; one entry results, and a playing announcement is
+  undisturbed because a stored file is replaced atomically [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Edge Cases"]
+- *(010)* A phrase removed by an operator while an announcement still holds it: a warm-up treats it as
+  not cached, synthesizes it again, and the new entry stands; the deferred removal no longer applies
+  to it [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Edge Cases"]
+- *(010)* A warmed entry whose file has gone from the disk: a miss, stored again
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Edge Cases"]
+- *(010)* A warm-up pushes the cache over its size limit: least recently used entries are evicted as for
+  any new entry; entries held by queued or playing announcements stay protected, subject to the
+  known gaps in `docs/backlog/reference-counted-cache-pins.md`; an entry evicted by its own store is
+  `CACHE_WRITE_FAILED` [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Edge Cases", FR-012]
+- *(010)* A warm body that also carries speak-only fields (`targetName`, `targetType`, `playbackMode`,
+  `routeVolume`, `duckingLevelDb`): they are ignored, not checked, even an unparseable `targetType`
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Edge Cases"]
+- *(010)* Warming during an outage: a cached phrase is still a hit; a missing one fails with the
+  provider's error [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Edge Cases"]
+- *(010)* `multiroom.tts.enabled=false`: the endpoint does not exist, like the rest of `/api/tts/**`
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Edge Cases"]
 
 ## Success criteria
 
@@ -1302,6 +1497,13 @@ repository boots the host.
 | 009 one `createRoute` call | a request with both fields reaches the hub as one `createRoute` call whose `RouteOptions` carry the join mode, the volume and the level | Unit-tested (`TtsServiceTest`) |
 | 009 refusals and faults | out-of-range values and a level with `mix` answer 400 before synthesis; out-of-range defaults abort start-up | Unit-tested (`TtsControllerTest`, `TtsServiceTest`, `TtsPropertiesValidationTest`) |
 | 009 live route | with hub 034 a route started by an announcement reads back with both values | Recorded by the hub on 2026-10-24 (route volume 100, level -25 dB over a playing stream); not repeated in this repository |
+| 010 speak from a warmed entry | after warming a phrase, a speak plays it with the provider unreachable, no provider call and no failed attempt | Unit-tested (`TtsServiceTest`: a speak after a warm-up is a hit while the provider throws); on production a warmed `piper-local` phrase spoken on `office` answered `cacheHit: true` (2026-11-01) |
+| 010 silence | warming produces no sound and leaves no route, input or queue entry | Unit-tested (nothing touched but the provider and cache); on production no ALSA playback device was open during or after a warm-up |
+| 010 free re-warm | re-warming cached phrases makes no provider calls and needs no network | Unit-tested (`TtsServiceTest`); on production the second warm answered `cacheHit: true` |
+| 010 resumable run | after a failed run, repeating the list sends the provider only the missing phrases | Unit-tested (`TtsServiceTest`) |
+| 010 hit ratio untouched | warm-ups change neither the announcement counts nor the cache hit ratio | Unit-tested (`TtsServiceTest`, `PrometheusNamesTest`); on production `tts.announcements` stayed 0 across two warm-ups |
+| 010 speak unchanged | every existing speak request behaves and answers as before | The existing speak tests pass unchanged through the extraction (713 before, 742 after, two test lines adapted for the new code and the retargeted handler check) |
+| 010 no false success | a warm-up that stored nothing never answers success | Unit-tested (`TtsServiceTest`: a write failure, and a stored path that no longer exists, both `CACHE_WRITE_FAILED`; `FilesystemAudioCacheTest` pins the eviction premise) |
 
 Sources for the 005 rows: [.specify/archive/005-tts-metrics/spec.md -> SC-001–SC-007], status from
 [.specify/archive/005-tts-metrics/tasks.md -> T041, T047, T048].
@@ -1313,6 +1515,8 @@ Sources for the 007 rows: [.specify/archive/007-failed-start-cleanup/spec.md -> 
 [.specify/archive/007-failed-start-cleanup/verification.md].
 Sources for the 009 rows: [.specify/archive/009-route-volume-ducking-level/spec.md -> "Success criteria"], status from
 [.specify/archive/009-route-volume-ducking-level/verification.md].
+Sources for the 010 rows: [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Success Criteria" SC-001–SC-007], status from
+[.specify/archive/010-cache-warm-without-playback/verification.md].
 
 ## Assumptions
 
@@ -1402,6 +1606,20 @@ Sources for the 009 rows: [.specify/archive/009-route-volume-ducking-level/spec.
   [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "Verifying on the production Raspberry Pi requires"]
 - **AS-021** The backlog item `failed-start-double-cleanup` is deleted once 007 ships
   [Source: .specify/archive/007-failed-start-cleanup/spec.md -> "The backlog item is deleted once this feature ships."]
+- **AS-022** The power-outage automation speaks each phrase as its own request (confirmed by the owner,
+  2026-11-01), so each phrase is one cache entry [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Assumptions"]
+- **AS-023** The caller loops over its phrases, one request each. No batch request exists: synthesis runs
+  while the request waits, and a batch would need per-text results and partial-failure rules
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Assumptions"]
+- **AS-024** The warmed set stays well under the cache's size limit: production's 500 MB fits about 700
+  phrases of average length, and the operator raises the limit, or ships
+  `docs/backlog/reference-counted-cache-pins.md` first, if it gets close
+  [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Assumptions"]
+- **AS-025** A warm-up is authorized as the rest of `/api/tts/**` is: the hub's LAN, with no authentication
+  of its own [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Assumptions"]
+- **AS-026** Out of scope: MQTT (the extension has none), keeping entries from eviction, a fallback to
+  another provider during an outage, and any interaction with a monthly budget (open question 6 in
+  `docs/backlog/provider-character-budget.md`) [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "Assumptions"]
 
 ## Host coupling
 

@@ -4,6 +4,34 @@
 
 Newest first.
 
+### 010 Warm The Cache Without Playback — archived 2026-11-01
+**Branch:** `010-cache-warm-without-playback`
+**Spec:** [.specify/archive/010-cache-warm-without-playback/spec.md](../archive/010-cache-warm-without-playback/spec.md)
+**Release:** `multiroom-tts` 0.1.11 (tag `v0.1.11`, PR #10), still requires `multiroom-api` 0.1.29
+
+**What was added:**
+
+- `POST /api/tts/cache/warm`: synthesizes and stores a phrase and plays nothing; answers
+  `{"cacheHit": bool}`; a stored phrase is a free hit that counts as just used, so a caller keeps a
+  list ahead of eviction by re-warming it
+- A later speak of the same text and resolved settings is a cache hit on any target, with no provider
+  call, because warm and speak share one cache identity step
+- `CACHE_WRITE_FAILED` (503) when the audio could not be stored, including an entry evicted by its
+  own store; no temporary-file fallback
+- `tts_cache_warm_total` (outcome, error, provider), separate from the announcement and cache lookup
+  metrics
+- Caller guidance in `docs/configuration.md` and the metric in `docs/metrics.md`
+
+**New Components:**
+
+- `WarmCommand`, `WarmRequest`, `WarmResponse`; `TtsService.warm`; `TtsMetrics.cacheWarmed` and
+  `cacheWarmFailed`; the `TtsCacheApi` branch in `TtsExceptionHandler`
+
+**Superseded:** none
+
+**Tasks Completed:** 40/40 tasks (T038-T040 on production: deploy check, silent warm-up and refusals,
+audible check on `office`; recorded in the feature's `verification.md`)
+
 ### 009 Announcement Route Volume And Ducking Level — archived 2026-10-25
 **Branch:** `034-route-volume-ducking-level` (named after hub feature 034)
 **Spec:** [.specify/archive/009-route-volume-ducking-level/spec.md](../archive/009-route-volume-ducking-level/spec.md)
