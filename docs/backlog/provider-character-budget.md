@@ -9,7 +9,8 @@ accident. Feature 004 deferred a spending cap to this item (`.specify/archive/00
 Feature 005 measured billable usage with it in mind (`.specify/archive/005-tts-metrics/`).
 
 **Depends on:** nothing. 005 (`tts_synthesis_characters`, 0.1.4) already provides the measurement.
-This item does not need service-account auth or the Cloud Monitoring API.
+This item does not need service-account auth or the Cloud Monitoring API. Related: cache warm-up
+(TTS-010, shipped; open question 6).
 
 **Effort:** Medium. A persisted monthly counter, new configuration keys, a check in
 `TtsService.synthesize`, and maybe a new error code in the REST contract.
@@ -113,3 +114,9 @@ which cost nothing.
    approximation of Google's billing cycle.
 5. **Counting failures:** should a failed provider call count against the budget, as 005's metric
    counts it? Google may or may not bill a call that errors.
+6. **Warm-ups:** a warm-up that misses the cache counts against the budget like any miss (TTS-010,
+   `POST /api/tts/cache/warm`). Should it be refused earlier
+   than an announcement (for example above 80 % of the budget), since it is never urgent? Without
+   that, a large warm-up, such as one after a voice change, can use up the month's budget and leave
+   new announcements refused. An earlier limit needs one more setting, and an error the caller can
+   recognise and retry later.

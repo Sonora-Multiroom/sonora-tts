@@ -5,6 +5,7 @@ import multiroom.tts.TtsException;
 import multiroom.tts.metrics.TtsMetrics;
 import multiroom.tts.rest.controller.TtsCacheController;
 import multiroom.tts.rest.controller.TtsController;
+import multiroom.tts.rest.controller.TtsVoiceController;
 import multiroom.tts.rest.dto.ErrorResponse;
 import multiroom.tts.service.TtsService;
 import org.junit.jupiter.api.Test;
@@ -58,7 +59,7 @@ class TtsExceptionHandlerTest {
         return switch (code) {
             case INVALID_REQUEST, TARGET_NOT_FOUND, PROVIDER_NOT_FOUND, INVALID_VOICE -> 400;
             case PROVIDER_TIMEOUT, PROVIDER_RATE_LIMITED, PROVIDER_ERROR, FORMAT_NORMALIZATION_FAILED,
-                    VOICE_CATALOGUE_UNAVAILABLE -> 503;
+                    VOICE_CATALOGUE_UNAVAILABLE, CACHE_WRITE_FAILED -> 503;
         };
     }
 
@@ -128,8 +129,8 @@ class TtsExceptionHandlerTest {
     void aFailureOnAnotherControllerIsNotAnAnnouncement() throws Exception {
         TtsMetrics recorder = mock(TtsMetrics.class);
         TtsExceptionHandler handler = new TtsExceptionHandler(recorder);
-        java.lang.reflect.Method clearCache = TtsCacheController.class.getMethod("clearCache", String.class);
-        HandlerMethod cacheHandler = new HandlerMethod(mock(TtsCacheController.class), clearCache);
+        java.lang.reflect.Method clearCache = TtsVoiceController.class.getMethod("listVoices", String.class, String.class, String.class);
+        HandlerMethod cacheHandler = new HandlerMethod(mock(TtsVoiceController.class), clearCache);
 
         ResponseEntity<ErrorResponse> invalid = handler.handleValidationFailure(new MethodArgumentNotValidException(
                 new MethodParameter(clearCache, 0), new BeanPropertyBindingResult(new Object(), "request")),
@@ -140,5 +141,22 @@ class TtsExceptionHandlerTest {
         assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(unreadable.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         verifyNoInteractions(recorder);
+    }
+
+    @Test
+    void anInvalidOrUnreadableWarmBodyIsCountedAsAFailedWarmUpOnly() throws Exception {
+        TtsMetrics recorder = mock(TtsMetrics.class);
+        TtsExceptionHandler handler = new TtsExceptionHandler(recorder);
+        java.lang.reflect.Method warm = TtsCacheController.class.getMethod("warm", multiroom.tts.rest.dto.WarmRequest.class);
+        HandlerMethod warmHandler = new HandlerMethod(mock(TtsCacheController.class), warm);
+
+        handler.handleValidationFailure(new MethodArgumentNotValidException(
+                new MethodParameter(warm, 0), new BeanPropertyBindingResult(new Object(), "request")), warmHandler);
+        handler.handleUnreadableBody(new HttpMessageNotReadableException(
+                "bad", new ServletServerHttpRequest(new MockHttpServletRequest())), warmHandler);
+
+        org.mockito.Mockito.verify(recorder, org.mockito.Mockito.times(2))
+                .cacheWarmFailed(TtsMetrics.UNKNOWN, "INVALID_REQUEST");
+        org.mockito.Mockito.verifyNoMoreInteractions(recorder);
     }
 }

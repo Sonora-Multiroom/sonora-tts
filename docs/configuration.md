@@ -500,7 +500,42 @@ full code list and their HTTP statuses.
 DELETE /api/tts/cache                       # clear everything
 DELETE /api/tts/cache?providerName=openai   # clear one provider's entries
 GET    /api/tts/cache/stats                 # entry count, size, per-provider breakdown
+POST   /api/tts/cache/warm                  # synthesize and store a phrase without playing it
 ```
+
+### Warming the cache
+
+A warm-up stores the audio for a phrase so that a later announcement of it is served from the cache,
+with no provider call. That keeps important announcements working while the provider is unreachable.
+Nothing is played, queued or pinned.
+
+```http
+POST /api/tts/cache/warm
+{ "text": "The water is shut off", "providerName": "openai", "voice": "alloy" }
+```
+
+Response (`200`): `{ "cacheHit": false }`. `true` means the audio was already stored; no provider was
+called and the entry counts as just used. The body takes the voice fields of a speak request (`text`,
+`providerName`, `voice`, `language`, `engine`, `pitch`, `speakingRate`, `stylePrompt`); target and
+playback fields are ignored, so a speak body can be reused.
+
+Rules for the caller:
+
+- Warm the exact text that is later spoken, with the same voice settings. Warm again after changing a
+  voice, language, style prompt or the default provider: the old entry is no longer the one a speak
+  request finds.
+- Name the provider. The default provider may be billed, and a warm-up that misses pays for a
+  synthesis.
+- Pace the requests. The extension has no rate limiter, and a warm-up can take as long as a
+  synthesis. Set the HTTP client's timeout above the provider's `timeout-seconds`.
+- Re-warm on a schedule. The cache evicts the least recently used entry and nothing keeps an entry,
+  so a phrase that is not used is eventually lost. A phrase already stored costs nothing to warm
+  again, but every hit rewrites `index.json` on disk, so keep the schedule modest.
+
+Errors: `400` for an invalid request or unknown provider, `503` with the provider's code when the
+provider fails, and `503 CACHE_WRITE_FAILED` when the audio could not be stored in the cache (a full
+disk, or an entry that does not fit). In that case nothing was stored, and repeating the request is
+safe.
 
 ## See also
 

@@ -19,5 +19,7 @@ public enum TtsErrorCode {
     /** The resolved voice is not in the provider's loaded voice catalogue (400). */
     INVALID_VOICE,
     /** Voice listing while the catalogue cannot be fetched, or a recent failure is in back-off (503). */
-    VOICE_CATALOGUE_UNAVAILABLE
+    VOICE_CATALOGUE_UNAVAILABLE,
+    /** A warm-up's audio is not in the cache; repeating the request is safe (503). */
+    CACHE_WRITE_FAILED
 }

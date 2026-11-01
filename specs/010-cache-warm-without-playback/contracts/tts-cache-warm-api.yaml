@@ -1,0 +1,89 @@
+openapi: 3.0.3
+info:
+  title: Sonora TTS cache warm-up
+  version: 0.1.11
+  description: >
+    Adds one operation and one error code to the contract in
+    .specify/archive/004-gemini-tts-provider/contracts/tts-rest-api.yaml, with the fields added since
+    by 006 and 009. Nothing else changes.
+paths:
+  /api/tts/cache/warm:
+    post:
+      operationId: warmCache
+      summary: Put an announcement's audio into the cache without playing it
+      description: >
+        Blocks until the entry is stored, so a miss can take up to the provider's timeout. A later
+        speak with the same text, provider and resolved settings is a hit on any target. Nothing is
+        played. The extension does not rate limit: the caller paces its requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WarmRequest'
+      responses:
+        '200':
+          description: The audio is in the cache
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarmResponse'
+        '400':
+          description: >
+            INVALID_REQUEST, PROVIDER_NOT_FOUND or INVALID_VOICE, under the same rules as speak
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: >
+            PROVIDER_TIMEOUT, PROVIDER_RATE_LIMITED, PROVIDER_ERROR, FORMAT_NORMALIZATION_FAILED or
+            CACHE_WRITE_FAILED. Not retried by the extension; repeating the request is safe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    WarmRequest:
+      type: object
+      description: >
+        The speak body's text, provider and voice fields. Unknown fields are ignored, so a speak body
+        can be sent unchanged and its target and playback fields have no effect.
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: Exact text that will be spoken; the cache does not normalize it
+        providerName:
+          type: string
+        voice:
+          type: string
+        language:
+          type: string
+        engine:
+          type: string
+        pitch:
+          type: number
+          format: double
+        speakingRate:
+          type: number
+          format: double
+        stylePrompt:
+          type: string
+    WarmResponse:
+      type: object
+      required: [cacheHit]
+      properties:
+        cacheHit:
+          type: boolean
+          description: true if the audio was already stored and no provider was called
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: A published error code; this version adds CACHE_WRITE_FAILED
+        message:
+          type: string

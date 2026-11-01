@@ -30,6 +30,14 @@ public class NoopTtsMetrics implements TtsMetrics {
     }
 
     @Override
+    public void cacheWarmed(String providerTag, boolean hit) {
+    }
+
+    @Override
+    public void cacheWarmFailed(String providerTag, String error) {
+    }
+
+    @Override
     public void cacheLookup(boolean hit) {
     }
 

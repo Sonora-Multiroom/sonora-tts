@@ -1875,4 +1875,253 @@ class TtsServiceTest {
         }
         return new ProviderRegistry(providers, "openai");
     }
+
+    // --- TTS-010: warming the cache without playback ---------------------------------------------
+
+    private static WarmCommand warmOf(String text) {
+        return new WarmCommand(text, null, null, null, null, null, null, null);
+    }
+
+    /** A cache whose entries are real files, as the path check in a warm-up requires. */
+    private Map<CacheKey, java.nio.file.Path> useWarmCache(java.nio.file.Path dir) {
+        Map<CacheKey, java.nio.file.Path> stored = new java.util.HashMap<>();
+        when(audioCache.get(any())).thenAnswer(inv -> Optional.ofNullable(stored.get(inv.getArgument(0))));
+        when(audioCache.put(any(), any())).thenAnswer(inv -> {
+            CacheKey key = inv.getArgument(0);
+            java.nio.file.Path path = java.nio.file.Files.write(dir.resolve(key.toHash() + ".wav"), new byte[] {1});
+            stored.put(key, path);
+            return path;
+        });
+        return stored;
+    }
+
+    private void stubProviderAudio() throws Exception {
+        when(openaiProvider.synthesize(any())).thenReturn(new SynthesisResult(fakeProviderWav(), 24000, 1, 16));
+    }
+
+    private TtsService openaiService() {
+        return serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+    }
+
+    private void verifyNothingPlayed() {
+        verifyNoInteractions(deviceRegistryService, routeService, completionListener, inputResolver);
+        verify(audioCache, never()).pin(any());
+        verify(deviceQueryService, never()).getOutput(any());
+        verify(deviceQueryService, never()).getGroup(any());
+    }
+
+    @Test
+    void warmingAnUncachedPhraseSynthesizesStoresAndPlaysNothing(@TempDir java.nio.file.Path dir) throws Exception {
+        useWarmCache(dir);
+        stubProviderAudio();
+
+        boolean hit = openaiService().warm(warmOf("Dinner is ready"));
+
+        assertThat(hit).isFalse();
+        verify(openaiProvider, times(1)).synthesize(any());
+        verify(audioCache).put(any(), any());
+        verifyNothingPlayed();
+        verify(metrics).synthesisStarted(any());
+        verify(metrics).audioProduced(any(), anyDouble());
+        verify(metrics).cacheWarmed("openai", false);
+    }
+
+    @Test
+    void aSpeakAfterAWarmUpIsAHitWithoutTheProvider(@TempDir java.nio.file.Path dir) throws Exception {
+        useWarmCache(dir);
+        stubProviderAudio();
+        TtsService service = openaiService();
+
+        service.warm(warmOf("Dinner is ready"));
+        when(openaiProvider.synthesize(any())).thenThrow(new TtsException(TtsErrorCode.PROVIDER_ERROR, "down"));
+        AnnounceResult result = service.speak(new AnnounceCommand("Dinner is ready", "living-room",
+                TargetType.SINGLE_OUTPUT, null, null, null, null, null, null));
+
+        assertThat(result.cacheHit()).isTrue();
+        verify(openaiProvider, times(1)).synthesize(any());
+    }
+
+    @Test
+    void aWarmUpAndASpeakBuildTheSameCacheKeyHoweverTheVoiceIsSpelled() {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsService service = openaiService();
+
+        service.warm(new WarmCommand("Dinner is ready", "openai", "alloy", "en-US", null, null, null, null));
+        service.speak(new AnnounceCommand("Dinner is ready", "living-room", TargetType.SINGLE_OUTPUT, null,
+                null, null, null, null, null));
+
+        List<CacheKey> keys = lookedUpKeys(2);
+        assertThat(keys.get(0)).isEqualTo(keys.get(1));
+        assertThat(keys.get(0).toHash()).isEqualTo(keys.get(1).toHash());
+    }
+
+    @Test
+    void aWarmUpLogsTheTextLengthAndProviderButNeverTheText() {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsService service = openaiService();
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events =
+                captureServiceLog(() -> service.warm(warmOf("A secret phrase")));
+
+        assertThat(events).anySatisfy(e -> assertThat(e.getFormattedMessage())
+                .startsWith("TTS_CACHE_WARMED").contains("text.length=15", "provider=openai", "cacheHit=true"));
+        assertThat(events).noneMatch(e -> e.getFormattedMessage().contains("secret"));
+    }
+
+    @Test
+    void warmingACachedPhraseIsFreeAndCountsAsUsed() {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+
+        boolean hit = openaiService().warm(warmOf("Dinner is ready"));
+
+        assertThat(hit).isTrue();
+        verify(audioCache, times(1)).get(any());
+        verify(openaiProvider, never()).synthesize(any());
+        verify(audioCache, never()).put(any(), any());
+        verifyNothingPlayed();
+        verify(metrics).cacheWarmed("openai", true);
+        verify(metrics, never()).synthesisStarted(any());
+        verify(metrics, never()).audioProduced(any(), anyDouble());
+    }
+
+    @Test
+    void aPhraseRemovedFromTheCacheIsSynthesizedAgain(@TempDir java.nio.file.Path dir) throws Exception {
+        Map<CacheKey, java.nio.file.Path> stored = useWarmCache(dir);
+        stubProviderAudio();
+        TtsService service = openaiService();
+
+        service.warm(warmOf("Dinner is ready"));
+        stored.clear();
+        service.warm(warmOf("Dinner is ready"));
+
+        verify(openaiProvider, times(2)).synthesize(any());
+    }
+
+    @Test
+    void reWarmingAListAfterOneFailureSynthesizesOnlyTheMissingPhrase(@TempDir java.nio.file.Path dir) throws Exception {
+        useWarmCache(dir);
+        when(openaiProvider.synthesize(any()))
+                .thenReturn(new SynthesisResult(fakeProviderWav(), 24000, 1, 16))
+                .thenThrow(new TtsException(TtsErrorCode.PROVIDER_TIMEOUT, "slow"))
+                .thenReturn(new SynthesisResult(fakeProviderWav(), 24000, 1, 16));
+        TtsService service = openaiService();
+
+        service.warm(warmOf("one"));
+        assertThatThrownBy(() -> service.warm(warmOf("two"))).isInstanceOf(TtsException.class);
+        service.warm(warmOf("one"));
+        service.warm(warmOf("two"));
+
+        verify(openaiProvider, times(3)).synthesize(any());
+    }
+
+    @Test
+    void aCacheWriteFailureIsCacheWriteFailedWithNoLeakedDetailAndNoSpill() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.empty());
+        stubProviderAudio();
+        when(audioCache.put(any(), any())).thenThrow(new CacheWriteException("/secret/path/index.json denied",
+                new java.io.IOException("denied")));
+        java.nio.file.Path tmp = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"));
+        long before = countSpills(tmp);
+
+        assertThatThrownBy(() -> openaiService().warm(warmOf("Dinner is ready")))
+                .isInstanceOfSatisfying(TtsException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(TtsErrorCode.CACHE_WRITE_FAILED);
+                    assertThat(e.getMessage()).doesNotContain("secret", "denied", "index.json");
+                });
+
+        assertThat(countSpills(tmp)).isEqualTo(before);
+        verify(metrics).cacheWarmFailed("openai", "CACHE_WRITE_FAILED");
+        verifyNothingPlayed();
+    }
+
+    private static long countSpills(java.nio.file.Path tmp) throws Exception {
+        try (var files = java.nio.file.Files.list(tmp)) {
+            return files.filter(p -> p.getFileName().toString().startsWith("multiroom-tts-")).count();
+        }
+    }
+
+    @Test
+    void aStoredPathThatNoLongerExistsIsCacheWriteFailed() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.empty());
+        stubProviderAudio();
+        when(audioCache.put(any(), any())).thenReturn(java.nio.file.Path.of("no/such/file.wav"));
+
+        assertThatThrownBy(() -> openaiService().warm(warmOf("Dinner is ready")))
+                .isInstanceOfSatisfying(TtsException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TtsErrorCode.CACHE_WRITE_FAILED));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TtsErrorCode.class, names = {"PROVIDER_TIMEOUT", "PROVIDER_RATE_LIMITED", "PROVIDER_ERROR"})
+    void aProviderFailureIsPassedThroughAfterOneCallAndNothingIsStored(TtsErrorCode code) {
+        when(audioCache.get(any())).thenReturn(Optional.empty());
+        when(openaiProvider.synthesize(any())).thenThrow(new TtsException(code, "provider said no"));
+
+        assertThatThrownBy(() -> openaiService().warm(warmOf("Dinner is ready")))
+                .isInstanceOfSatisfying(TtsException.class, e -> assertThat(e.getErrorCode()).isEqualTo(code));
+
+        verify(openaiProvider, times(1)).synthesize(any());
+        verify(audioCache, never()).put(any(), any());
+        verify(metrics).cacheWarmFailed("openai", code.name());
+    }
+
+    @Test
+    void invalidWarmRequestsAreRefusedBeforeAnyProviderOrCacheWork() {
+        TtsService service = openaiService();
+
+        assertThatThrownBy(() -> service.warm(warmOf(" "))).isInstanceOfSatisfying(TtsException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(TtsErrorCode.INVALID_REQUEST));
+        assertThatThrownBy(() -> service.warm(warmOf("x".repeat(501)))).isInstanceOfSatisfying(TtsException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(TtsErrorCode.INVALID_REQUEST));
+        assertThatThrownBy(() -> service.warm(new WarmCommand("Hi", "nope", null, null, null, null, null, null)))
+                .isInstanceOfSatisfying(TtsException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TtsErrorCode.PROVIDER_NOT_FOUND));
+
+        verify(openaiProvider, never()).synthesize(any());
+        verifyNoInteractions(audioCache);
+        verify(metrics, times(2)).cacheWarmFailed("openai", "INVALID_REQUEST");
+        verify(metrics).cacheWarmFailed(TtsMetrics.UNKNOWN, "PROVIDER_NOT_FOUND");
+    }
+
+    @Test
+    void aSettingTheProviderRejectsIsRefusedAsSpeakRefusesIt() {
+        when(openaiProvider.resolveSettings(any()))
+                .thenThrow(new TtsException(TtsErrorCode.INVALID_REQUEST, "pitch is not supported"));
+
+        assertThatThrownBy(() -> openaiService().warm(
+                new WarmCommand("Hi", null, null, null, null, 1.0, null, null)))
+                .isInstanceOfSatisfying(TtsException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TtsErrorCode.INVALID_REQUEST));
+
+        verifyNoInteractions(audioCache);
+    }
+
+    @Test
+    void anUnexpectedFailureIsCountedAsInternalAndRethrown() {
+        when(audioCache.get(any())).thenThrow(new IllegalStateException("boom"));
+
+        assertThatThrownBy(() -> openaiService().warm(warmOf("Hi"))).isInstanceOf(IllegalStateException.class);
+
+        verify(metrics).cacheWarmFailed("openai", TtsMetrics.INTERNAL);
+    }
+
+    @Test
+    void aWarmUpTouchesNoAnnouncementOrCacheLookupMetric(@TempDir java.nio.file.Path dir) throws Exception {
+        useWarmCache(dir);
+        stubProviderAudio();
+        TtsService service = openaiService();
+
+        service.warm(warmOf("one"));
+        service.warm(warmOf("one"));
+
+        verify(metrics, never()).announcementAccepted(any());
+        verify(metrics, never()).announcementRejected(any(), any(), any());
+        verify(metrics, never()).cacheLookup(org.mockito.ArgumentMatchers.anyBoolean());
+        verify(metrics, never()).trackQueue(any(), any(), any());
+        verify(metrics, never()).playbackStarted();
+        verify(metrics, never()).playbackFailed();
+        verify(metrics, times(1)).synthesisStarted(any());
+        verify(metrics).cacheWarmed("openai", false);
+        verify(metrics).cacheWarmed("openai", true);
+    }
 }

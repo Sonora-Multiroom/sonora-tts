@@ -94,6 +94,17 @@ The length of the audio a successful synthesis produced, measured after conversi
 One increment per cache lookup for an announcement. Tag `outcome`: `hit` or `miss`. A request
 rejected before the lookup (an unknown target, say) is not counted.
 
+### `tts_cache_warm_total` (counter)
+
+One increment per warm-up request (`POST /api/tts/cache/warm`). Tags: `outcome` (`hit`: already
+stored, no provider call; `synthesized`: stored now; `failed`), `error` (the error code of a failed
+warm-up, `INTERNAL` for an unexpected fault, otherwise `none`) and `provider` (a configured name, or
+`unknown`).
+
+`tts_cache_requests_total` and `tts_announcements_total` exclude warm-ups, so warming does not move
+the hit ratio. The synthesis metrics (`tts_synthesis_*`) include them, because a warm-up that misses
+calls the provider and is billed like any other synthesis.
+
 ### `tts_cache_size_bytes`, `tts_cache_max_bytes`, `tts_cache_entries` (gauges)
 
 The cache's current size, its configured maximum (`cache.max-size-mb`) and its entry count, read
@@ -184,6 +195,12 @@ sum by (provider, tier) (increase(tts_synthesis_characters_sum{outcome="success"
 
 # Cache hit ratio
 sum(rate(tts_cache_requests_total{outcome="hit"}[1h])) / sum(rate(tts_cache_requests_total[1h]))
+
+# Warm-ups by outcome: how many were free, how many paid for a provider call, how many failed
+sum by (outcome) (increase(tts_cache_warm_total[1d]))
+
+# Warm-ups that called the provider (and so cost money), per provider
+sum by (provider) (increase(tts_cache_warm_total{outcome="synthesized"}[$__range]))
 
 # Cache fill
 tts_cache_size_bytes / tts_cache_max_bytes

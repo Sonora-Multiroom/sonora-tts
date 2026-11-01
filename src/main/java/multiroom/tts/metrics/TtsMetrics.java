@@ -38,6 +38,12 @@ public interface TtsMetrics {
      */
     void announcementRejected(String providerTag, String error, String reason);
 
+    /** A warm-up request was answered with 200: the audio was already stored ({@code hit}) or is now. */
+    void cacheWarmed(String providerTag, boolean hit);
+
+    /** A warm-up request was answered with an error ({@code error} is a code name or {@link #INTERNAL}). */
+    void cacheWarmFailed(String providerTag, String error);
+
     /** The cache was consulted for an announcement. */
     void cacheLookup(boolean hit);
 

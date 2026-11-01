@@ -48,6 +48,7 @@ public class MicrometerTtsMetrics implements TtsMetrics {
     private static final String SYNTHESIS = "tts.synthesis";
     private static final String SYNTHESIS_CHARACTERS = "tts.synthesis.characters";
     private static final String SYNTHESIS_AUDIO = "tts.synthesis.audio";
+    private static final String CACHE_WARM = "tts.cache.warm";
     private static final String CACHE_REQUESTS = "tts.cache.requests";
     private static final String QUEUE_DEPTH = "tts.queue.depth";
     private static final String PLAYBACKS = "tts.playbacks";
@@ -58,8 +59,8 @@ public class MicrometerTtsMetrics implements TtsMetrics {
     private final Set<String> metricsWarnedAbout = ConcurrentHashMap.newKeySet();
 
     /**
-     * Registers the cache gauges, and the accepted-announcement series of every configured
-     * provider at 0, so a dashboard shows "nothing yet" rather than "no data" before the first
+     * Registers the cache gauges, and the accepted-announcement and warm-up hit and synthesized
+     * series of every configured provider at 0, so a dashboard shows "nothing yet" rather than "no data" before the first
      * announcement.
      *
      * @param longestTimeoutSeconds the longest {@code timeout-seconds} among the enabled provider
@@ -72,6 +73,10 @@ public class MicrometerTtsMetrics implements TtsMetrics {
         this.synthesisBuckets = synthesisBuckets(longestTimeoutSeconds);
         record("tts.cache", () -> registerCacheGauges(audioCache));
         record(ANNOUNCEMENTS, () -> providerNames.forEach(name -> announcementCounter("accepted", NONE, NONE, name)));
+        record(CACHE_WARM, () -> providerNames.forEach(name -> {
+            warmCounter("hit", NONE, name);
+            warmCounter("synthesized", NONE, name);
+        }));
     }
 
     /**
@@ -130,6 +135,25 @@ public class MicrometerTtsMetrics implements TtsMetrics {
                 .tag("outcome", outcome)
                 .tag("error", tag(error, NONE))
                 .tag("reason", tag(reason, NONE))
+                .tag("provider", tag(providerTag, UNKNOWN))
+                .register(registry);
+    }
+
+    @Override
+    public void cacheWarmed(String providerTag, boolean hit) {
+        record(CACHE_WARM, () -> warmCounter(hit ? "hit" : "synthesized", NONE, providerTag).increment());
+    }
+
+    @Override
+    public void cacheWarmFailed(String providerTag, String error) {
+        record(CACHE_WARM, () -> warmCounter("failed", error, providerTag).increment());
+    }
+
+    private Counter warmCounter(String outcome, String error, String providerTag) {
+        return Counter.builder(CACHE_WARM)
+                .description("Warm-up requests answered, by outcome, error code and provider")
+                .tag("outcome", outcome)
+                .tag("error", tag(error, NONE))
                 .tag("provider", tag(providerTag, UNKNOWN))
                 .register(registry);
     }

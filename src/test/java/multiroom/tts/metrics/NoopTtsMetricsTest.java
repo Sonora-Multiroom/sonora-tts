@@ -24,6 +24,8 @@ class NoopTtsMetricsTest {
             metrics.announcementAccepted("openai");
             metrics.announcementRejected("openai", "TARGET_NOT_FOUND", "none");
             metrics.cacheLookup(true);
+            metrics.cacheWarmed("openai", true);
+            metrics.cacheWarmFailed("openai", "CACHE_WRITE_FAILED");
             metrics.synthesisStarted(usage).succeeded();
             metrics.synthesisStarted(usage).failed(TtsErrorCode.PROVIDER_TIMEOUT);
             metrics.audioProduced(usage, 1.0);

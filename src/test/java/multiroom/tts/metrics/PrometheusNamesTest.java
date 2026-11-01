@@ -54,6 +54,10 @@ class PrometheusNamesTest {
 
         metrics.cacheLookup(true);
         metrics.cacheLookup(false);
+        metrics.cacheWarmed("openai", true);
+        metrics.cacheWarmed("openai", false);
+        metrics.cacheWarmFailed("openai", "CACHE_WRITE_FAILED");
+        metrics.cacheWarmFailed("unknown", "INVALID_REQUEST");
         metrics.trackQueue(TargetType.SINGLE_OUTPUT, "kitchen", () -> 1);
         metrics.trackQueue(TargetType.OUTPUT_GROUP, "all-rooms", () -> 0);
         metrics.playbackStarted();
@@ -71,7 +75,7 @@ class PrometheusNamesTest {
                 "tts_synthesis_characters_count", "tts_synthesis_characters_sum", "tts_synthesis_characters_max",
                 "tts_synthesis_audio_seconds_count", "tts_synthesis_audio_seconds_sum",
                 "tts_synthesis_audio_seconds_max",
-                "tts_cache_requests_total", "tts_cache_size_bytes", "tts_cache_max_bytes", "tts_cache_entries",
+                "tts_cache_requests_total", "tts_cache_warm_total", "tts_cache_size_bytes", "tts_cache_max_bytes", "tts_cache_entries",
                 "tts_queue_depth", "tts_playbacks_total");
 
         for (String name : names) {
@@ -99,6 +103,11 @@ class PrometheusNamesTest {
                 "tts_synthesis_audio_seconds_sum{provider=\"gemini\",tier=\"gemini-2.5-flash-tts\",type=\"google-gemini\"} 2",
                 "tts_cache_requests_total{outcome=\"hit\"} 1",
                 "tts_cache_requests_total{outcome=\"miss\"} 1",
+                "tts_cache_warm_total{error=\"none\",outcome=\"hit\",provider=\"openai\"} 1",
+                "tts_cache_warm_total{error=\"none\",outcome=\"synthesized\",provider=\"openai\"} 1",
+                "tts_cache_warm_total{error=\"none\",outcome=\"hit\",provider=\"gemini\"} 0",
+                "tts_cache_warm_total{error=\"CACHE_WRITE_FAILED\",outcome=\"failed\",provider=\"openai\"} 1",
+                "tts_cache_warm_total{error=\"INVALID_REQUEST\",outcome=\"failed\",provider=\"unknown\"} 1",
                 "tts_cache_size_bytes 2048",
                 "tts_cache_max_bytes 1048576",
                 "tts_cache_entries 2",

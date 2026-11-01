@@ -45,7 +45,8 @@ import java.util.UUID;
 import java.util.function.Function;
 
 /**
- * Orchestrates one announcement end to end: validate, resolve the target and provider, serve from
+ * Orchestrates one announcement end to end (and, in {@link #warm}, storing a phrase's audio
+ * without playing it): validate, resolve the target and provider, serve from
  * cache or synthesize and convert, then hand the routing step to the per-target queue. The
  * announcement joins its target alongside whatever already plays there, in duck-others or mix
  * mode ({@link PlaybackMode}); the host lowers and restores the other routes.
@@ -64,6 +65,8 @@ public class TtsService implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(TtsService.class);
     private static final SampleFormat NATIVE_FORMAT = SampleFormat.standard();
+    private static final String CACHE_WRITE_FAILED_MESSAGE =
+            "The audio could not be stored in the cache; nothing was stored, and repeating the request is safe";
 
     private final TtsProperties properties;
     private final ProviderRegistry providerRegistry;
@@ -117,6 +120,62 @@ public class TtsService implements SmartLifecycle {
     }
 
     /**
+     * Stores the audio of a phrase in the cache without playing it (TTS-010). Returns whether it was
+     * already stored, in which case it counts as just used and no provider is called. Nothing is
+     * queued, routed or pinned. The cache identity is the one {@link #speak} builds, so a later
+     * announcement of the same text and settings is a hit.
+     */
+    public boolean warm(WarmCommand command) {
+        String providerTag = providerTag(command.providerName());
+        try {
+            boolean cacheHit = storeWarmAudio(command);
+            metrics.cacheWarmed(providerTag, cacheHit);
+            return cacheHit;
+        } catch (TtsException e) {
+            metrics.cacheWarmFailed(providerTag, e.getErrorCode().name());
+            throw e;
+        } catch (RuntimeException e) {
+            metrics.cacheWarmFailed(providerTag, TtsMetrics.INTERNAL);
+            throw e;
+        }
+    }
+
+    private boolean storeWarmAudio(WarmCommand command) {
+        validateText(command.text());
+        ResolvedAudio resolved = resolveAudio(command.text(), command.providerName(), command.voice(),
+                command.language(), command.engine(), command.pitch(), command.speakingRate(),
+                command.stylePrompt());
+        // Not metrics.cacheLookup: that metric counts lookups made for announcements
+        boolean cacheHit = audioCache.get(resolved.cacheKey()).isPresent();
+        if (!cacheHit) {
+            byte[] pcm = synthesizePcm(command.text(), resolved);
+            storeOrFail(resolved.providerName(), resolved.cacheKey(), pcm);
+        }
+        log.info("TTS_CACHE_WARMED text.length={} provider={} cacheHit={}", command.text().length(),
+                resolved.providerName(), cacheHit);
+        return cacheHit;
+    }
+
+    /**
+     * An entry can be evicted by its own store (larger than the cap, or a cache full of pinned
+     * entries), so a path that no longer exists is a failed store too. Nothing is spilled to a
+     * temporary file: a warm-up that stored nothing has done nothing.
+     */
+    private void storeOrFail(String providerName, CacheKey cacheKey, byte[] pcm) {
+        Path stored;
+        try {
+            stored = audioCache.put(cacheKey, pcm);
+        } catch (CacheWriteException e) {
+            log.warn("TTS_CACHE_WARM_FAILED provider={} reason={}", providerName, e.getMessage());
+            throw new TtsException(TtsErrorCode.CACHE_WRITE_FAILED, CACHE_WRITE_FAILED_MESSAGE, e);
+        }
+        if (!Files.exists(stored)) {
+            log.warn("TTS_CACHE_WARM_FAILED provider={} reason=entry evicted by its own store", providerName);
+            throw new TtsException(TtsErrorCode.CACHE_WRITE_FAILED, CACHE_WRITE_FAILED_MESSAGE);
+        }
+    }
+
+    /**
      * A name the caller sent becomes a tag only if it is configured: anything else would let a
      * caller mint a new series per request.
      */
@@ -137,23 +196,11 @@ public class TtsService implements SmartLifecycle {
         Double duckingLevelDb = resolveDuckingLevel(playbackMode, command.duckingLevelDb());
         validateTargetExists(command.targetType(), command.targetName());
 
-        String providerName = command.providerName() != null
-                ? command.providerName()
-                : providerRegistry.defaultProviderName();
-        TtsProvider provider = command.providerName() != null
-                ? providerRegistry.resolve(command.providerName())
-                : providerRegistry.resolveDefault();
-
-        // Resolution is pure and runs before the cache lookup, so the key is built from the
-        // resolved settings however the caller spelled them, and a hit costs no network work.
-        // The *Key forms are the provider's decision; they are copied, never
-        // interpreted, so this path knows no provider's defaults (Principle IV).
-        SynthesisSettings settings = provider.resolveSettings(new RequestedSettings(
-                command.voice(), command.language(), command.engine(), command.pitch(), command.speakingRate(),
-                command.stylePrompt()));
-        CacheKey cacheKey = new CacheKey(command.text(), providerName, settings.engine(), settings.voiceKey(),
-                settings.language(), settings.pitchKey(), settings.speakingRateKey(), NATIVE_FORMAT,
-                settings.stylePrompt());
+        ResolvedAudio resolved = resolveAudio(command.text(), command.providerName(), command.voice(),
+                command.language(), command.engine(), command.pitch(), command.speakingRate(),
+                command.stylePrompt());
+        String providerName = resolved.providerName();
+        CacheKey cacheKey = resolved.cacheKey();
 
         boolean cacheHit;
         boolean temporaryFile = false;
@@ -168,11 +215,7 @@ public class TtsService implements SmartLifecycle {
         } else {
             cacheHit = false;
             log.debug("TTS_CACHE_MISS text.length={} provider={}", command.text().length(), providerName);
-            Synthesized synthesized = synthesize(provider, providerName,
-                    new SynthesisRequest(command.text(), settings,
-                            NATIVE_FORMAT.sampleRate(), NATIVE_FORMAT.channels()));
-            byte[] pcm = audioConverter.convert(synthesized.result().audioData(), NATIVE_FORMAT);
-            metrics.audioProduced(synthesized.usage(), audioSeconds(pcm));
+            byte[] pcm = synthesizePcm(command.text(), resolved);
             try {
                 audioFile = audioCache.put(cacheKey, pcm);
                 audioCache.pin(cacheKey);
@@ -210,6 +253,42 @@ public class TtsService implements SmartLifecycle {
                 announcementId, command.targetName(), cacheHit, queueDepth);
 
         return new AnnounceResult(announcementId, cacheHit, queueDepth);
+    }
+
+    /** The provider, resolved settings and cache identity of one piece of text, shared by announcing and warming. */
+    private record ResolvedAudio(TtsProvider provider, String providerName, SynthesisSettings settings,
+                                 CacheKey cacheKey) {
+    }
+
+    private ResolvedAudio resolveAudio(String text, String requestedProvider, String voice, String language,
+                                       String engine, Double pitch, Double speakingRate, String stylePrompt) {
+        String providerName = requestedProvider != null
+                ? requestedProvider
+                : providerRegistry.defaultProviderName();
+        TtsProvider provider = requestedProvider != null
+                ? providerRegistry.resolve(requestedProvider)
+                : providerRegistry.resolveDefault();
+
+        // Resolution is pure and runs before the cache lookup, so the key is built from the
+        // resolved settings however the caller spelled them, and a hit costs no network work.
+        // The *Key forms are the provider's decision; they are copied, never
+        // interpreted, so this path knows no provider's defaults (Principle IV).
+        SynthesisSettings settings = provider.resolveSettings(new RequestedSettings(
+                voice, language, engine, pitch, speakingRate, stylePrompt));
+        CacheKey cacheKey = new CacheKey(text, providerName, settings.engine(), settings.voiceKey(),
+                settings.language(), settings.pitchKey(), settings.speakingRateKey(), NATIVE_FORMAT,
+                settings.stylePrompt());
+        return new ResolvedAudio(provider, providerName, settings, cacheKey);
+    }
+
+    /** Synthesizes, converts to the native format and counts the audio produced. */
+    private byte[] synthesizePcm(String text, ResolvedAudio resolved) {
+        Synthesized synthesized = synthesize(resolved.provider(), resolved.providerName(),
+                new SynthesisRequest(text, resolved.settings(),
+                        NATIVE_FORMAT.sampleRate(), NATIVE_FORMAT.channels()));
+        byte[] pcm = audioConverter.convert(synthesized.result().audioData(), NATIVE_FORMAT);
+        metrics.audioProduced(synthesized.usage(), audioSeconds(pcm));
+        return pcm;
     }
 
     /** What one provider call produced, and the work it was asked for. */

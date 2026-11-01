@@ -58,6 +58,8 @@ class MicrometerTtsMetricsTest {
             throwing.announcementAccepted("openai");
             throwing.announcementRejected("openai", "TARGET_NOT_FOUND", "none");
             throwing.cacheLookup(true);
+            throwing.cacheWarmed("openai", true);
+            throwing.cacheWarmFailed("openai", "CACHE_WRITE_FAILED");
             TtsMetrics.SynthesisTimer timer = throwing.synthesisStarted(usage("Hi", null));
             timer.succeeded();
             timer.failed(TtsErrorCode.PROVIDER_TIMEOUT);
@@ -245,5 +247,32 @@ class MicrometerTtsMetricsTest {
 
         assertThat(registry.get("tts.playbacks").tag("outcome", "started").counter().count()).isEqualTo(2);
         assertThat(registry.get("tts.playbacks").tag("outcome", "failed").counter().count()).isEqualTo(1);
+    }
+
+    @Test
+    void warmUpsAreCountedByOutcomeErrorAndProvider() {
+        metrics.cacheWarmed("openai", true);
+        metrics.cacheWarmed("openai", false);
+        metrics.cacheWarmed("openai", false);
+        metrics.cacheWarmFailed("unknown", "INVALID_REQUEST");
+        metrics.cacheWarmFailed("google", "INTERNAL");
+
+        assertThat(warmCount("hit", "none", "openai")).isEqualTo(1);
+        assertThat(warmCount("synthesized", "none", "openai")).isEqualTo(2);
+        assertThat(warmCount("failed", "INVALID_REQUEST", "unknown")).isEqualTo(1);
+        assertThat(warmCount("failed", "INTERNAL", "google")).isEqualTo(1);
+    }
+
+    @Test
+    void successfulWarmUpSeriesOfEveryConfiguredProviderExistAtZero() {
+        assertThat(warmCount("hit", "none", "google")).isZero();
+        assertThat(warmCount("synthesized", "none", "google")).isZero();
+        assertThat(warmCount("hit", "none", "openai")).isZero();
+        assertThat(warmCount("synthesized", "none", "openai")).isZero();
+    }
+
+    private double warmCount(String outcome, String error, String provider) {
+        return registry.get("tts.cache.warm").tags("outcome", outcome, "error", error, "provider", provider)
+                .counter().count();
     }
 }

@@ -265,4 +265,60 @@ class FilesystemAudioCacheTest {
 
         assertThat(reopened.get(key("hello"))).contains(written);
     }
+
+    // --- what warming the cache relies on ---
+
+    @Test
+    void aGetHitProtectsAnEntryFromTheNextEviction(@TempDir Path dir) {
+        AudioCache cache = new FilesystemAudioCache(dir, 1);
+        byte[] chunk = new byte[400_000];
+        cache.put(key("a"), chunk);
+        cache.put(key("b"), chunk);
+
+        assertThat(cache.get(key("a"))).isPresent();
+        cache.put(key("c"), chunk);
+
+        assertThat(cache.get(key("a"))).isPresent();
+        assertThat(cache.get(key("b"))).isEmpty();
+    }
+
+    @Test
+    void anEntryRemovedWhilePinnedIsAMissAndAPutOfItSurvivesTheLaterUnpin(@TempDir Path dir) {
+        FilesystemAudioCache cache = new FilesystemAudioCache(dir, 500);
+        CacheKey key = key("a");
+        cache.put(key, new byte[] {1});
+        cache.pin(key);
+        cache.clear();
+        assertThat(cache.get(key)).isEmpty();
+
+        Path rewritten = cache.put(key, new byte[] {2});
+        cache.unpin(key);
+
+        assertThat(rewritten).exists();
+        assertThat(cache.get(key)).contains(rewritten);
+    }
+
+    @Test
+    void anEntryLargerThanTheCapIsEvictedByItsOwnPut(@TempDir Path dir) {
+        AudioCache cache = new FilesystemAudioCache(dir, 1);
+
+        Path path = cache.put(key("big"), new byte[1_500_000]);
+
+        assertThat(path).doesNotExist();
+        assertThat(cache.get(key("big"))).isEmpty();
+    }
+
+    @Test
+    void aNewEntryInACacheFullOfPinnedEntriesIsEvictedByItsOwnPut(@TempDir Path dir) {
+        AudioCache cache = new FilesystemAudioCache(dir, 1);
+        byte[] chunk = new byte[600_000];
+        CacheKey pinned = key("pinned");
+        cache.put(pinned, chunk);
+        cache.pin(pinned);
+
+        Path path = cache.put(key("new"), chunk);
+
+        assertThat(path).doesNotExist();
+        assertThat(cache.get(pinned)).isPresent();
+    }
 }

@@ -71,12 +71,15 @@ public class TtsExceptionHandler {
     }
 
     /**
-     * These are rejected before {@code TtsService} runs, so they are counted here, and only for a
-     * speak request: the other controllers do not make announcements. The provider is {@code
+     * These are rejected before {@code TtsService} runs, so they are counted here, for a speak
+     * request (an announcement) and for the cache controller (only {@code warm} has a body there):
+     * the other controllers do not make announcements. The provider is {@code
      * unknown} because the body was never read far enough to trust one.
      */
     private ResponseEntity<ErrorResponse> invalidRequest(String message, HandlerMethod handlerMethod) {
-        if (handlerMethod != null && TtsApi.class.isAssignableFrom(handlerMethod.getBeanType())) {
+        if (handlerMethod != null && TtsCacheApi.class.isAssignableFrom(handlerMethod.getBeanType())) {
+            metrics.cacheWarmFailed(TtsMetrics.UNKNOWN, TtsErrorCode.INVALID_REQUEST.name());
+        } else if (handlerMethod != null && TtsApi.class.isAssignableFrom(handlerMethod.getBeanType())) {
             metrics.announcementRejected(TtsMetrics.UNKNOWN, TtsErrorCode.INVALID_REQUEST.name(), TtsMetrics.NONE);
         }
         return ResponseEntity.badRequest().body(new ErrorResponse(TtsErrorCode.INVALID_REQUEST.name(), message));
