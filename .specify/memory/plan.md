@@ -27,6 +27,11 @@
 > `playback.route-volume` and `playback.ducking-level-db` keys, `routeVolume` and `duckingLevelDb` on
 > the HTTP surface, 009's design decisions and testing notes, and the CI hub pin moved to a 0.1.29
 > commit; version 0.1.10.
+> **Revision**: 2026-11-01 — archived `.specify/archive/010-cache-warm-without-playback`: `POST
+> /api/tts/cache/warm` on the HTTP surface, `WarmCommand`, `WarmRequest` and `WarmResponse` in the
+> tree, the error enum gains `CACHE_WRITE_FAILED`, the `tts.cache.warm` metric, 010's design
+> decisions and testing notes. No dependency or configuration change; still `multiroom-api` 0.1.29;
+> version 0.1.11.
 
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
@@ -38,7 +43,8 @@ planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension
 `006-announcement-ducking` [Source: .specify/archive/006-announcement-ducking/plan.md],
 `007-failed-start-cleanup` [Source: .specify/archive/007-failed-start-cleanup/plan.md] and
 `008-malformed-target-name` [Source: .specify/archive/008-malformed-target-name/plan.md] and
-`009-route-volume-ducking-level` [Source: .specify/archive/009-route-volume-ducking-level/plan.md].
+`009-route-volume-ducking-level` [Source: .specify/archive/009-route-volume-ducking-level/plan.md] and
+`010-cache-warm-without-playback` [Source: .specify/archive/010-cache-warm-without-playback/plan.md].
 
 ## Shape
 
@@ -94,13 +100,15 @@ src/main/java/multiroom/tts/
 │                              #   still PROVIDER_ERROR to the caller) since 005; AnnouncementTask
 │                              #   carries the playback mode, no route snapshot, since 006
 ├── service/                   # TtsService (validate → resolve → cache → synthesize → convert →
-│                              #   enqueue; createRoute in the playback mode), PlaybackCompletionListener
+│                              #   enqueue; createRoute in the playback mode; 010: warm(WarmCommand) runs the same
+│                              #   resolve and synthesize steps up to the cache store), PlaybackCompletionListener
 │                              #   (@EventListener RouteDestroyedEvent; no RouteService since 006),
 │                              #   VoiceQueryService (voice listing)
 └── rest/
     ├── api/                   # TtsApi, TtsCacheApi, TtsVoiceApi: mappings + OpenAPI annotations
     ├── controller/            # TtsController, TtsCacheController, TtsVoiceController (implement them)
-    ├── dto/                   # SpeakRequest, SpeakAcceptedResponse, VoiceListResponse, ErrorResponse
+    ├── dto/                   # SpeakRequest, SpeakAcceptedResponse, VoiceListResponse, ErrorResponse;
+    │                          #   010: WarmRequest, WarmResponse
     └── advice/                # TtsExceptionHandler, scoped to the api/ interfaces; records
                                #   pre-service rejections and answers an unreadable body (005)
 src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
@@ -216,6 +224,7 @@ with no change to `multiroom-rest`:
 | `POST` | `/api/tts/speak` | `TtsController` — `202` with `cacheHit`, or `{error, message}` with 400/503 |
 | `DELETE` | `/api/tts/cache` | `TtsCacheController` |
 | `GET` | `/api/tts/cache/stats` | `TtsCacheController` |
+| `POST` | `/api/tts/cache/warm` | `TtsCacheController` (010) — `200` with `{cacheHit}`, or `{error, message}` with 400/503; blocks until the entry is stored |
 | `GET` | `/api/tts/providers/{name}/voices?language=&engine=` | `TtsVoiceController` (002) — 400 for a non-Google provider, 503 `VOICE_CATALOGUE_UNAVAILABLE`. Since 004 also `google-gemini` (an `engine` filter is a 400; `language` is form-checked but does not narrow); every voice carries `gender`, and null fields are omitted |
 
 Since 002, `POST /api/tts/speak` also takes optional `engine`, `pitch` and `speakingRate`, and the
@@ -252,6 +261,16 @@ refuses before any advice is chosen is not answered by this module
 states the rule ("1-255 letters, digits, hyphens or underscores")
 [Source: .specify/archive/008-malformed-target-name/plan.md -> "Summary"].
 
+010 added one endpoint and one code. `POST /api/tts/cache/warm` takes a speak body's `text`,
+`providerName`, `voice`, `language`, `engine`, `pitch`, `speakingRate` and `stylePrompt` (other fields
+are ignored through `@JsonIgnoreProperties(ignoreUnknown = true)`) and answers `200 {"cacheHit":
+bool}`. The error enum has ten codes: `CACHE_WRITE_FAILED` (503) is new, and the handler needed no
+change because everything outside its caller-fixable set already maps to 503. Warm-up has no rate
+limiter. The contract for the new operation is
+[.specify/archive/010-cache-warm-without-playback/contracts/tts-cache-warm-api.yaml](../archive/010-cache-warm-without-playback/contracts/tts-cache-warm-api.yaml)
+(v0.1.11), an addition to 006's v0.1.5 rather than a replacement
+[Source: .specify/archive/010-cache-warm-without-playback/plan.md -> "Summary"].
+
 ### Metrics
 
 [Source: .specify/archive/005-tts-metrics/research.md -> R3, R7] — published through the host's Micrometer
@@ -264,6 +283,7 @@ registry on the host's existing `GET /actuator/prometheus`; no endpoint of this 
 | `tts.synthesis.characters` | DistributionSummary | `tts_synthesis_characters_{count,sum,max}` | `provider`, `type`, `tier`, `outcome`, `error`, `part` (`text`/`style_prompt`) |
 | `tts.synthesis.audio` | DistributionSummary (seconds) | `tts_synthesis_audio_seconds_{count,sum,max}` | `provider`, `type`, `tier` |
 | `tts.cache.requests` | Counter | `tts_cache_requests_total` | `outcome` (`hit`/`miss`) |
+| `tts.cache.warm` | Counter | `tts_cache_warm_total` | `provider`, `outcome` (`hit`/`synthesized`/`failed`), `error` |
 | `tts.cache.size`, `tts.cache.max`, `tts.cache.entries` | Gauges | `tts_cache_size_bytes`, `tts_cache_max_bytes`, `tts_cache_entries` | — |
 | `tts.queue.depth` | Gauge per target | `tts_queue_depth` | `target`, `target_type` (`output`/`group`) |
 | `tts.playbacks` | Counter | `tts_playbacks_total` | `outcome` (`started`/`failed`) |
@@ -280,6 +300,11 @@ that failed to start is `failed`, never `started`, counted once
 set changed [Source: .specify/archive/006-announcement-ducking/plan.md -> "Metrics"]. Contract (v0.1.4):
 [.specify/archive/005-tts-metrics/contracts/metrics.md](../archive/005-tts-metrics/contracts/metrics.md);
 operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
+
+Since 010, `tts_cache_warm_total` counts warm-ups (`error` is a code, `INTERNAL` or `none`; the `hit`
+and `synthesized` series of every configured provider start at 0). `tts_announcements_total` and
+`tts_cache_requests_total` exclude warm-ups, and the synthesis metrics include them
+[Source: .specify/archive/010-cache-warm-without-playback/research.md -> R4].
 
 ## Architecture decisions
 
@@ -565,6 +590,32 @@ operator guide with every query: [docs/metrics.md](../../docs/metrics.md).
 - **CI pin**: the workflow builds `multiroom-api` and the starter from the hub at the last commit of
   the pom's parent version; raising the parent to 0.1.29 moved `HUB_REF` with it
 
+[Source: .specify/archive/010-cache-warm-without-playback/research.md -> R1, R2, R3, R4, R5, R6, R7, R8]
+
+- **One cache identity** (010): `TtsService` extracts the provider, settings and `CacheKey`
+  construction into one private step and the synthesize, convert and `audioProduced` work into
+  another, and both `announce` and `warm` call them. A second copy of key construction would pass
+  every test the day it was written and turn warm-ups into misses after the next key dimension. A
+  `playback` flag threaded through `announce`, and a separate `CacheWarmService` (which would force
+  the single measured provider call site public), were rejected
+- **A store that kept nothing is a failure**: `warm` catches `CacheWriteException` and also checks
+  that the path `put` returned still exists, because `FilesystemAudioCache.evictIfNeeded` can evict
+  an entry larger than the cap, or a new one in a cache full of pinned entries, by its own `put`. Both
+  throw `TtsException(CACHE_WRITE_FAILED)` with one fixed sentence, never the exception text, which
+  carries a path. `PROVIDER_ERROR` was rejected: the provider succeeded and a retry would bill it again
+- **Accepted gap**: `persistIndex` only logs a failed `index.json` write, so a warm-up can answer 200
+  and lose the entry at the next restart; the next scheduled re-warm repairs it, and reporting it would
+  change `AudioCache` for announcements too
+- **Own metric, no tag on existing ones**: `tts.cache.warm` with `cacheWarmed` and `cacheWarmFailed` on
+  `TtsMetrics`; `warm` wraps the work as `speak` does, so every answer is counted once. A `kind` tag on
+  an existing metric was rejected as a change to every existing series. A body refused before the
+  service is counted in `TtsExceptionHandler.invalidRequest` through a `TtsCacheApi` branch, which is
+  exact because only `warm` has a body there
+- **Blocking, no concurrency control**: the request waits for synthesis (the caller's HTTP timeout
+  must exceed the provider's `timeout-seconds`); two simultaneous misses both synthesize, as two speak
+  requests do, and the atomic file replace leaves one good entry
+- **Version**: 0.1.11; `multiroom.require_api_version` stays 0.1.29
+
 ## Testing strategy
 
 Unit and slice tests only; nothing boots the host.
@@ -626,6 +677,19 @@ Unit and slice tests only; nothing boots the host.
   400 and synthesizes nothing), `TtsServiceTest` (options reach both `createRoute` overloads,
   request over default, `mix` sends no level, `mix` with a level refused before synthesis, values
   resolved at acceptance). The end-to-end route read-back was done by the hub (2026-10-24)
+- Cache warm-up (010) [Source: .specify/archive/010-cache-warm-without-playback/plan.md -> "Testing"]: `TtsServiceTest` (a miss synthesizes and stores and touches no input, route,
+  queue or pin; a speak after a warm-up is a hit while the provider throws; warm and speak build one
+  `CacheKey` however the voice is spelled; a hit costs no provider call; a half-finished list resumes;
+  `CACHE_WRITE_FAILED` for a write failure and for a stored path that no longer exists, with no
+  spill file and no path in the message; provider codes pass through after one call; refusals before
+  any provider or cache work; each outcome counted once, and no announcement or cache lookup
+  metric), `TtsCacheControllerTest` (`200 {"cacheHit":...}`, every voice field reaches the
+  command, speak-only fields ignored, 503 and 400 shapes), `TtsExceptionHandlerTest` (a refused warm
+  body counted as a failed warm-up only), `MicrometerTtsMetricsTest`, `NoopTtsMetricsTest` and
+  `PrometheusNamesTest` (`tts_cache_warm_total`), `FilesystemAudioCacheTest` (a `get` protects an entry
+  from the next eviction; an entry larger than the cap, or new in a cache of pinned entries, is
+  evicted by its own `put`). On production (2026-11-01, `piper-local`): a silent warm, a free re-warm,
+  the metrics and the two refusals, then an audible speak of the warmed phrase on `office`
 - JaCoCo's 80 % floor fails `mvn verify`
 
 ## Build, deploy, verify

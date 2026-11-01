@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-01
 
-**Status**: Draft
+**Status**: Completed
 
 **Input**: User description: "docs/backlog/cache-warm-without-playback.md": put an announcement's
 audio into the cache in advance, without anything being heard.
