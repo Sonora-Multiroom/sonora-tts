@@ -1065,6 +1065,39 @@ class TtsServiceTest {
     }
 
     @Test
+    void anExpectedRefusalIsLoggedQuietlyAndAbandonsTheTask() {
+        ch.qos.logback.classic.Logger serviceLogger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(TtsService.class);
+        ch.qos.logback.classic.Level before = serviceLogger.getLevel();
+        serviceLogger.setLevel(ch.qos.logback.classic.Level.DEBUG);
+        try {
+            when(audioCache.get(any())).thenReturn(Optional.of(HIT));
+            when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class)))
+                    .thenThrow(new multiroom.api.exceptions.ExpectedRouteRefusalException("overtaken",
+                            multiroom.api.exceptions.ExpectedRouteRefusalException.Kind.STOPPED_WHILE_STARTING,
+                            null));
+            TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+            List<ch.qos.logback.classic.spi.ILoggingEvent> events = captureServiceLog(() -> {
+                service.speak(speakTo("living-room", null));
+                verify(completionListener, timeout(ASYNC_TIMEOUT_MS)).cancel(any(InputId.class));
+            });
+
+            assertThat(events).filteredOn(e -> e.getFormattedMessage().startsWith("TTS_PLAYBACK_OVERTAKEN"))
+                    .singleElement().satisfies(e -> {
+                        assertThat(e.getLevel()).isEqualTo(ch.qos.logback.classic.Level.DEBUG);
+                        assertThat(e.getThrowableProxy()).isNull();
+                        assertThat(e.getFormattedMessage()).contains("announcementId=", "target=living-room",
+                                "kind=STOPPED_WHILE_STARTING");
+                    });
+            assertThat(events).noneMatch(e -> e.getLevel().isGreaterOrEqual(ch.qos.logback.classic.Level.WARN));
+            verify(deviceRegistryService, timeout(ASYNC_TIMEOUT_MS)).unregisterInput(any(InputId.class));
+        } finally {
+            serviceLogger.setLevel(before);
+        }
+    }
+
+    @Test
     void aNonAdmissionRouteFailureIsStillAnError() {
         when(audioCache.get(any())).thenReturn(Optional.of(HIT));
         when(routeService.createRoute(any(InputId.class), any(OutputId.class), any(RouteOptions.class)))
