@@ -39,9 +39,13 @@ edit it from here.**
 3. After the host is rebuilt, rebuild and redeploy this JAR. Incompatibility shows up only at
    runtime (`Require-API-Version` → `SemanticVersion.isCompatibleWith`), and a stale JAR beside a
    rebuilt core is a known silent failure (2026-09-13: all four extensions dropped out at once).
-4. The extension requires `multiroom-api` 0.1.29 (`multiroom.require_api_version`): a speak request's
+4. The extension requires `multiroom-api` 0.1.33 (`multiroom.require_api_version`): a speak request's
    `routeVolume` and `duckingLevelDb`, and the `tts.playback` defaults for both, reach the hub through
-   `RouteService.createRoute(…, RouteOptions)`. A ducking level is sent only for `duck-others`.
+   `RouteService.createRoute(…, RouteOptions)` (0.1.29). A ducking level is sent only for `duck-others`.
+   Since 0.1.33 (hub feature 037, TTS 0.1.12) an announcement overtaken by a newer command or by the end
+   of its source arrives as `ExpectedRouteRefusalException`: `TtsService` logs `TTS_PLAYBACK_OVERTAKEN` at
+   DEBUG without a stack trace and abandons it. Any other `RuntimeException` is still `TTS_PLAYBACK_FAILED`
+   at ERROR. Verified on the Pi 2026-11-05.
 5. `multiroom.lan` is **production**. Read-only inspection over SSH is pre-authorised (config, logs,
    `systemctl status`, `jcmd`), for example
    `ssh -o BatchMode=yes -o ConnectTimeout=10 tiger@multiroom.lan 'cat /home/tiger/multiroom.yml'`.
