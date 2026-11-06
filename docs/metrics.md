@@ -128,7 +128,10 @@ was created) or `failed` (it could not start). `failed` includes an announcement
 refused, for instance at its route limit: it is dropped, not retried, and logged as
 `TTS_PLAYBACK_REFUSED` with the host's reason and the output. An announcement whose route was
 admitted but failed to start is `failed` too, never `started`, and is logged as
-`TTS_PLAYBACK_FAILED` with the exception. Each announcement taken off a queue is counted exactly
+`TTS_PLAYBACK_FAILED` with the exception. Since 0.1.12 (hub API 0.1.33), an announcement overtaken
+while it started, because a newer command stopped its route or its source ended, is `failed` as
+well and is logged as `TTS_PLAYBACK_OVERTAKEN` at DEBUG only: ordinary use causes it, so a rise in
+`failed` with no WARN or ERROR line beside it is not a fault. Each announcement taken off a queue is counted exactly
 once, so `started + failed` equals the announcements taken off queues.
 
 ## Billable usage

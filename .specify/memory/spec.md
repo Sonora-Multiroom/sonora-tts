@@ -31,6 +31,9 @@
 > (request, cache, silence, answer, observability), the `Warm-up request` and `Warm-up count`
 > entities, seven edge cases, seven success criteria, AS-022–AS-026, an out-of-scope line and a
 > 0.1.11 paragraph under "Current state". No pre-existing entry was folded into or removed.
+> **Revision**: 2026-11-06 — HUB-037 follow-up (no feature number): an overtaken announcement is
+> logged `TTS_PLAYBACK_OVERTAKEN` at DEBUG — a 0.1.12 paragraph under "Current state", the
+> lifecycle's failed-start branch, and host coupling raised to API 0.1.33.
 
 **Scope**: one extension for the multiroom audio system — text-to-speech announcements delivered to a
 room or a group of rooms.
@@ -157,6 +160,15 @@ so a caller keeps its list ahead of eviction by re-warming it on a schedule. A s
 answers the new code `CACHE_WRITE_FAILED` (503). Warm-ups have their own metric,
 `tts_cache_warm_total`. No new hub API (still multiroom-api 0.1.29)
 [Source: .specify/archive/010-cache-warm-without-playback/spec.md -> "User Scenarios", FR-001, FR-010, FR-012, FR-014].
+
+**Overtaken announcements logged quietly** in 0.1.12 (2026-11-06, no feature number; follows hub
+HUB-037, multiroom-api 0.1.33): when a newer command stops an announcement's route, or its source
+ends, while the route is still starting, the hub now throws `ExpectedRouteRefusalException`.
+Ordinary use causes it, so the extension logs `TTS_PLAYBACK_OVERTAKEN` (announcement id, target,
+the hub's kind) at DEBUG without a stack trace instead of `TTS_PLAYBACK_FAILED` at ERROR. It is
+otherwise a failed start: one failed playback counted, the input removed by the extension, the
+queue told once, no retry. Any other route failure is still `TTS_PLAYBACK_FAILED` at ERROR.
+Requires multiroom-api 0.1.33. No new endpoint, error code or metric.
 
 Features in progress live under [specs/](../../specs/) until they are archived here.
 
@@ -1250,6 +1262,8 @@ RECEIVED → VALIDATED            text, then playbackMode (006), target, provide
               registerInput failure → ERROR TTS_PLAYBACK_FAILED, handled as a failed start below
               (an input that was never registered is tolerated by unregisterInput)
               host refusal (RouteAdmissionException) → WARN TTS_PLAYBACK_REFUSED, playback failed;
+              overtaken while starting (ExpectedRouteRefusalException) → DEBUG
+              TTS_PLAYBACK_OVERTAKEN, playback failed (since 0.1.12);
               admitted but failed to start → ERROR TTS_PLAYBACK_FAILED (since 007); on hub
               0.1.22+ its end-of-route notice (no startedAt) arrives first and is left to this
               path; either way: playback failed counted once, unpin, release, delete,
@@ -1623,8 +1637,9 @@ Sources for the 010 rows: [Source: .specify/archive/010-cache-warm-without-playb
 
 ## Host coupling
 
-Built against `multiroom-api` **0.1.29** since 009 (0.1.21 since 006, 0.1.18 before; 009 needs
-`RouteOptions` and the options overload of `createRoute`) [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R8]; 006 needed its join modes and
+Built against `multiroom-api` **0.1.33** since 0.1.12 (0.1.29 since 009, 0.1.21 since 006, 0.1.18
+before; 0.1.12 needs `ExpectedRouteRefusalException`, 009 needs `RouteOptions` and the options
+overload of `createRoute`) [Source: .specify/archive/009-route-volume-ducking-level/spec.md -> R8]; 006 needed its join modes and
 `RouteAdmissionException` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"],
 resolved from the local `~/.m2`; the host repository is
 `D:\projects-multiroom\multiroom-ai`. The required version is pinned in `pom.xml` and advertised in

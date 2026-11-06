@@ -4,6 +4,24 @@
 
 Newest first.
 
+### Overtaken Announcements Logged Quietly (no feature number) — 2026-11-06
+**Branch:** `hub-037-expected-refusal-logs` (follows hub feature HUB-037)
+**Release:** `multiroom-tts` 0.1.12, requires `multiroom-api` 0.1.33 (HUB-037)
+
+**What changed:**
+
+- An announcement whose route the hub refuses with `ExpectedRouteRefusalException` (a newer command
+  stopped it, or its source ended, while it started) logs `TTS_PLAYBACK_OVERTAKEN announcementId=
+  target= kind=` at DEBUG without a stack trace, instead of `TTS_PLAYBACK_FAILED` at ERROR. It still
+  ends through `abandon`: one failed playback counted, input unregistered, queue signalled once
+- Every other `RuntimeException` from `createRoute` is still `TTS_PLAYBACK_FAILED` at ERROR
+- Starter parent and `multiroom.require_api_version` raised to 0.1.33 (manifest
+  `[0.1.33,0.2.0)`), CI `HUB_REF` moved to a 0.1.33 hub commit; `docs/metrics.md` notes the new log
+  line under `tts_playbacks_total`
+
+**Verification:** `mvn verify` 743 tests, 0 failures (2026-11-06); behaviour checked on the Pi
+2026-11-05
+
 ### 010 Warm The Cache Without Playback — archived 2026-11-01
 **Branch:** `010-cache-warm-without-playback`
 **Spec:** [.specify/archive/010-cache-warm-without-playback/spec.md](../archive/010-cache-warm-without-playback/spec.md)
