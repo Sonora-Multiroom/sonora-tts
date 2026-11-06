@@ -32,6 +32,10 @@
 > tree, the error enum gains `CACHE_WRITE_FAILED`, the `tts.cache.warm` metric, 010's design
 > decisions and testing notes. No dependency or configuration change; still `multiroom-api` 0.1.29;
 > version 0.1.11.
+> **Revision**: 2026-11-06 — HUB-037 follow-up (no feature number): starter parent and
+> `multiroom.require_api_version` raised to 0.1.33 (manifest `[0.1.33,0.2.0)`) for
+> `ExpectedRouteRefusalException`, logged `TTS_PLAYBACK_OVERTAKEN` at DEBUG; CI hub pin moved to a
+> 0.1.33 commit; version 0.1.12.
 
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
@@ -52,8 +56,8 @@ A single Maven module producing one shaded JAR, `multiroom-tts.jar`, dropped int
 `extensions/` directory.
 
 ```text
-pom.xml                    # parent: ai.multiroom:multiroom-extension-starter:0.1.29 (since 009),
-                           #   <relativePath/> EMPTY; multiroom.require_api_version 0.1.29
+pom.xml                    # parent: ai.multiroom:multiroom-extension-starter:0.1.33 (since 0.1.12),
+                           #   <relativePath/> EMPTY; multiroom.require_api_version 0.1.33
 src/main/java/multiroom/tts/
 ├── TtsAutoConfiguration.java  # the entry point — @AutoConfiguration,
 │                              #   @ConditionalOnProperty("multiroom.tts.enabled", matchIfMissing),
@@ -128,7 +132,7 @@ The manifest, written by the inherited parent POM, carries `Extension-Id: tts`,
 
 | Dependency | Scope | Why |
 |---|---|---|
-| `multiroom-api` 0.1.29 | `provided` (from the parent) | The whole contract: routing, device registry, `TargetType`, `RouteDestroyedEvent`, `FormatConverter`; since 006 `RouteJoinMode`, `RouteAdmissionException` and the three-argument `createRoute` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"]; since 009 `RouteOptions` and the `RouteOptions` overloads of `createRoute` [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", pom.xml row] |
+| `multiroom-api` 0.1.33 | `provided` (from the parent) | The whole contract: routing, device registry, `TargetType`, `RouteDestroyedEvent`, `FormatConverter`; since 006 `RouteJoinMode`, `RouteAdmissionException` and the three-argument `createRoute` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"]; since 009 `RouteOptions` and the `RouteOptions` overloads of `createRoute` [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", pom.xml row]; since 0.1.12 `ExpectedRouteRefusalException` (HUB-037) |
 | `spring-boot-starter-web`, `-validation`, Jackson | `provided` | Supplied by the host at runtime; bundling risks a class collision with another extension |
 | `spring-boot-configuration-processor` | `provided`, optional | Configuration metadata for `multiroom.tts.*` |
 | `swagger-annotations-jakarta` 2.2.47 | `provided` | `@Operation` / `@ApiResponse` for springdoc; pinned to the copy `multiroom-rest` ships, never bundled |
@@ -149,6 +153,8 @@ reads `Require-API-Version: [0.1.21,0.2.0)` and a host without multiroom-ai 023 
 deploy the host first [Source: .specify/archive/006-announcement-ducking/research.md -> R8]. 009 raised
 both again to 0.1.29 (manifest `Require-API-Version: [0.1.29,0.2.0)`) for `RouteOptions`; the host
 needs multiroom-ai 034 [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", pom.xml row].
+0.1.12 raised both to 0.1.33 (manifest `[0.1.33,0.2.0)`) to catch `ExpectedRouteRefusalException`; the
+host needs HUB-037, deployed first.
 
 ## Configuration
 
@@ -524,7 +530,10 @@ and `synthesized` series of every configured provider start at 0). `tts_announce
   stack trace; any other failure logs `TTS_PLAYBACK_FAILED announcementId= target=` at ERROR with
   one (since 007; before it, `Failed to create route for announcement …`). Reason and output go to
   the log only, never a tag; a new `outcome="refused"` value was rejected
-  [Source: .specify/archive/007-failed-start-cleanup/research.md -> R5]
+  [Source: .specify/archive/007-failed-start-cleanup/research.md -> R5]. Since 0.1.12 (HUB-037, API
+  0.1.33) an `ExpectedRouteRefusalException` (route stopped or source ended while starting) has its
+  own catch before the generic one: `TTS_PLAYBACK_OVERTAKEN announcementId= target= kind=` at DEBUG,
+  no stack trace, same `abandon` path, still `outcome="failed"`
 - **Completion timing unchanged** (R6): the host stops a finished route as soon as its lane has
   drained and starts the ducking release itself, so the next queued announcement still starts after
   the previous route is destroyed
@@ -588,7 +597,7 @@ and `synthesized` series of every configured provider start at 0). `tts_announce
 - **Old constructor shapes kept**: `AnnounceCommand` and `AnnouncementTask` keep their earlier
   constructors, passing `null`, so existing callers and tests are unchanged
 - **CI pin**: the workflow builds `multiroom-api` and the starter from the hub at the last commit of
-  the pom's parent version; raising the parent to 0.1.29 moved `HUB_REF` with it
+  the pom's parent version; raising the parent to 0.1.29 moved `HUB_REF` with it, and to 0.1.33 again in 0.1.12
 
 [Source: .specify/archive/010-cache-warm-without-playback/research.md -> R1, R2, R3, R4, R5, R6, R7, R8]
 

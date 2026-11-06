@@ -1,5 +1,6 @@
 package multiroom.tts.service;
 
+import multiroom.api.exceptions.ExpectedRouteRefusalException;
 import multiroom.api.exceptions.RouteAdmissionException;
 import multiroom.api.model.GroupId;
 import multiroom.api.model.InputId;
@@ -364,6 +365,11 @@ public class TtsService implements SmartLifecycle {
             // refusal, not a fault, so no stack trace.
             log.warn("TTS_PLAYBACK_REFUSED announcementId={} target={} output={} reason={}",
                     task.announcementId(), task.targetName(), e.getOutputId(), e.getReason());
+            abandon(task, onPlaybackComplete);
+        } catch (ExpectedRouteRefusalException e) {
+            // The route was replaced or its source ended while it started: nothing to fix.
+            log.debug("TTS_PLAYBACK_OVERTAKEN announcementId={} target={} kind={}",
+                    task.announcementId(), task.targetName(), e.getKind());
             abandon(task, onPlaybackComplete);
         } catch (RuntimeException e) {
             log.error("TTS_PLAYBACK_FAILED announcementId={} target={}",
