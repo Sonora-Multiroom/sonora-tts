@@ -9,7 +9,7 @@ jobs:
       - uses: actions/cache/restore@v4
         id: c
         with:
-          path: ~/.m2/repository
+          path: /home/runner/.m2/repository
           key: setup-java-Linux-x64-maven-09e0ecba6719bac0eff24f8dd74dc646790346f0c6991f60f5833d4fd5366b26
       - run: |
           echo "hit=${{ steps.c.outputs.cache-hit }}"
