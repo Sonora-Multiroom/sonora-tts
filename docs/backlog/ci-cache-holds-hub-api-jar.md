@@ -1,7 +1,6 @@
 # Keep the Hub's API JAR Out of the Public CI Cache
 
-**Status:** Implemented 2026-11-13, awaiting verification. Delete this item once a new cache is shown
-to hold no `ai/multiroom`.
+**Status:** Implemented and verified 2026-11-13 (PR #3: the restored cache held no `ai/multiroom`). Delete this item when the PR merges.
 
 **Origin:** Found while planning `sonora-youtube` (`sonora-multiroom` backlog
 `youtube-resolver-as-extension.md`), whose CI will copy this repository's workflow.
@@ -26,8 +25,6 @@ public repository could restore.
 
 ## Open questions
 
-- **Verify by unpacking.** After the workflow's first run on `master`, check the new cache (or the
-  post-step log) for `ai/multiroom`. Not yet possible: the change is not pushed.
 - **`sonora-youtube`.** Its workflow must carry the same step from its first commit.
 - **Still needed if `multiroom-api` and the starter are published?** Then the step can go.
 - **Raise the approval rule?** "Require approval for all external contributors" would also cover a
