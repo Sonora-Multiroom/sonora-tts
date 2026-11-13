@@ -48,3 +48,7 @@ jobs:
 
       - name: Verify
         run: mvn -B verify
+
+      - name: Keep the hub's artifacts out of the Maven cache
+        if: always()
+        run: rm -rf ~/.m2/repository/ai/multiroom
