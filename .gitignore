@@ -30,7 +30,6 @@ tts-cache/
 .specify/*
 !.specify/archive/
 !.specify/memory/
-!.specify/feature.json
 specs/archive/
 specs/drafts/
 
@@ -38,3 +37,6 @@ specs/drafts/
 # specified/planned, redundant once implemented — never commit these.
 specs/*/checklists/requirements.md
 .specify/archive/*/checklists/requirements.md
+
+# Worktrees
+.worktrees/
