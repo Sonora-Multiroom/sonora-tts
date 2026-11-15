@@ -16,18 +16,28 @@ import java.util.UUID;
  * @param playbackMode the effective mode, resolved when the request was accepted
  * @param routeVolume  the effective route volume, or {@code null} to follow the outputs' volume
  * @param duckingLevelDb the effective ducking level, or {@code null}; always {@code null} for {@code mix}
+ * @param chime        the effective chime id or {@code none}, or {@code null} for no opinion
  * @param cacheKey      {@code null} when {@code audioFile} is a spillover temp file rather than a
  *                       pinned cache entry
  */
 public record AnnouncementTask(UUID announcementId, InputId inputId, TargetType targetType, String targetName,
                                 Path audioFile, boolean temporaryFile, PlaybackMode playbackMode,
-                                CacheKey cacheKey, Integer routeVolume, Double duckingLevelDb) {
+                                CacheKey cacheKey, Integer routeVolume, Double duckingLevelDb,
+                                String chime) {
+
+    /** An announcement that names no chime. */
+    public AnnouncementTask(UUID announcementId, InputId inputId, TargetType targetType, String targetName,
+                            Path audioFile, boolean temporaryFile, PlaybackMode playbackMode,
+                            CacheKey cacheKey, Integer routeVolume, Double duckingLevelDb) {
+        this(announcementId, inputId, targetType, targetName, audioFile, temporaryFile, playbackMode, cacheKey,
+                routeVolume, duckingLevelDb, null);
+    }
 
     /** An announcement that plays at the outputs' volume and the hub's own ducking level. */
     public AnnouncementTask(UUID announcementId, InputId inputId, TargetType targetType, String targetName,
                             Path audioFile, boolean temporaryFile, PlaybackMode playbackMode,
                             CacheKey cacheKey) {
         this(announcementId, inputId, targetType, targetName, audioFile, temporaryFile, playbackMode, cacheKey,
-                null, null);
+                null, null, null);
     }
 }

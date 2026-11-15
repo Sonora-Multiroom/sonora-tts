@@ -325,4 +325,20 @@ class TtsControllerTest {
         }
         org.mockito.Mockito.verifyNoInteractions(ttsService);
     }
+
+    @Test
+    void chimeReachesTheCommand() throws Exception {
+        when(ttsService.speak(any())).thenReturn(new AnnounceResult(UUID.randomUUID(), false, 1));
+
+        mockMvc.perform(post("/api/tts/speak")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"text":"All clear","targetName":"kitchen","targetType":"SINGLE_OUTPUT","chime":"ding"}
+                                """))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<AnnounceCommand> captor = ArgumentCaptor.forClass(AnnounceCommand.class);
+        verify(ttsService).speak(captor.capture());
+        assertThat(captor.getValue().chime()).isEqualTo("ding");
+    }
 }

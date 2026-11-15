@@ -317,6 +317,7 @@ every metric, the definition of billable usage, and example queries.
 | `playback.default-mode` | `duck-others` | How an announcement joins what is playing: `duck-others` (lowers it) or `mix` (leaves it). Case-insensitive; anything else aborts start-up with `multiroom-tts: playback.default-mode '<value>' is not one of duck-others, mix` |
 | `playback.route-volume` | *(unset)* | Volume, 0-100, of every announcement. It replaces the target outputs' volume for the announcement only, so the room's volume control does not reach it. Unset: the announcement follows the outputs' volume. A request's `routeVolume` wins. Outside 0-100 aborts start-up |
 | `playback.ducking-level-db` | *(unset)* | How far a `duck-others` announcement lowers what else plays, in dB from -60.0 to 0.0. Unset: the hub's input default and system level (`audio.mixing.ducking.level-db`). Never sent for a `mix` announcement. A request's `duckingLevelDb` wins. Outside the range aborts start-up |
+| `playback.chime` | *(unset)* | Chime that starts every announcement: the id of a chime the hub has loaded (`GET /api/v2/chimes`), or `none` for no chime even where the target has one. Unset: the target's own chime setting decides. A request's `chime` wins. Blank aborts start-up; an id the hub has not loaded logs `TTS_DEFAULT_CHIME_UNKNOWN` at start-up and is not sent, so announcements still play |
 | `voice-catalogue.ttl` | `24h` | `GOOGLE_CLOUD` only: how long a fetched voice list is trusted. Must be positive |
 | `voice-catalogue.failure-backoff` | `60s` | `GOOGLE_CLOUD` only: no fetch this long after a failed one. Must be positive |
 | `voice-catalogue.fetch-timeout` | `3s` | `GOOGLE_CLOUD` only: cap on one voice-list fetch. Must be positive |
@@ -435,6 +436,14 @@ A request can also set `routeVolume` (0-100, this announcement only) and, with `
 `duckingLevelDb` with `mix`, is `400 INVALID_REQUEST` before anything is synthesized. The defaults
 above (`playback.route-volume`, `playback.ducking-level-db`) apply when a request names none and are
 read when the request is accepted. These settings need a hub with `multiroom-api` 0.1.29 or later.
+
+A request can name a `chime` too: the id of a chime the hub has loaded (`GET /api/v2/chimes`, configured
+under the hub's `audio.chimes.sounds`), or `none` for no chime. An id the hub has not loaded is
+`400 INVALID_REQUEST` naming the loaded ones, before anything is synthesized. With no `chime` in the
+request, `playback.chime` applies; with neither, the target output's or group's own `chime` decides,
+and that one plays only after the output has been silent for the hub's `audio.chimes.silence-millis`.
+A chime the announcement names plays before it unless every target output is already playing. It adds
+its own length to the time before the words start, cache hit or not. Needs `multiroom-api` 0.1.34.
 
 These host settings (in `multiroom.yml`, not this extension's) govern the result:
 

@@ -1,6 +1,7 @@
 package multiroom.tts;
 
 import multiroom.api.conversion.FormatConverter;
+import multiroom.api.services.ChimeService;
 import multiroom.api.services.DeviceQueryService;
 import multiroom.api.services.DeviceRegistryService;
 import multiroom.api.services.RouteService;
@@ -118,9 +119,11 @@ public class TtsAutoConfiguration {
                                   AudioConverter audioConverter, AudioCache audioCache,
                                   TtsInputResolver ttsInputResolver, DeviceRegistryService deviceRegistryService,
                                   DeviceQueryService deviceQueryService, RouteService routeService,
-                                  PlaybackCompletionListener playbackCompletionListener, TtsMetrics ttsMetrics) {
+                                  ChimeService chimeService, PlaybackCompletionListener playbackCompletionListener,
+                                  TtsMetrics ttsMetrics) {
         return new TtsService(properties, providerRegistry, audioConverter, audioCache, ttsInputResolver,
-                deviceRegistryService, deviceQueryService, routeService, playbackCompletionListener, ttsMetrics);
+                deviceRegistryService, deviceQueryService, routeService, chimeService, playbackCompletionListener,
+                ttsMetrics);
     }
 
     /**

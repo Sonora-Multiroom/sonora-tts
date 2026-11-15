@@ -34,6 +34,8 @@
 > **Revision**: 2026-11-06 — HUB-037 follow-up (no feature number): an overtaken announcement is
 > logged `TTS_PLAYBACK_OVERTAKEN` at DEBUG — a 0.1.12 paragraph under "Current state", the
 > lifecycle's failed-start branch, and host coupling raised to API 0.1.33.
+> **Revision**: 2026-11-15 — HUB-040 adoption (no feature number): a chime before an announcement — a
+> 0.1.13 paragraph under "Current state" and host coupling raised to API 0.1.34.
 
 **Scope**: one extension for the multiroom audio system — text-to-speech announcements delivered to a
 room or a group of rooms.
@@ -169,6 +171,15 @@ the hub's kind) at DEBUG without a stack trace instead of `TTS_PLAYBACK_FAILED` 
 otherwise a failed start: one failed playback counted, the input removed by the extension, the
 queue told once, no retry. Any other route failure is still `TTS_PLAYBACK_FAILED` at ERROR.
 Requires multiroom-api 0.1.33. No new endpoint, error code or metric.
+
+**A chime before an announcement** in 0.1.13 (2026-11-15, no feature number; adopts hub HUB-040,
+multiroom-api 0.1.34): a speak request may name `chime`, the id of a chime the hub has loaded or `none`,
+and `playback.chime` is the default when it names none; with neither, the target's own chime setting
+decides. A requested id the hub has not loaded answers 400 `INVALID_REQUEST` listing the loaded ones,
+before anything is synthesized or queued. A configured id the hub has not loaded is logged at start-up
+(`TTS_DEFAULT_CHIME_UNKNOWN`, WARN) and not sent, so announcements still play; a blank one aborts
+start-up. The chime is not part of the cache identity. Requires multiroom-api 0.1.34. No new endpoint,
+error code or metric.
 
 Features in progress live under [specs/](../../specs/) until they are archived here.
 

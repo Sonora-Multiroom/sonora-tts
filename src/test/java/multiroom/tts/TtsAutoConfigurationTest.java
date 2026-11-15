@@ -2,6 +2,7 @@ package multiroom.tts;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import multiroom.api.conversion.FormatConverter;
+import multiroom.api.services.ChimeService;
 import multiroom.api.services.DeviceQueryService;
 import multiroom.api.services.DeviceRegistryService;
 import multiroom.api.services.RouteService;
@@ -37,6 +38,7 @@ class TtsAutoConfigurationTest {
             .withBean(RouteService.class, () -> mock(RouteService.class))
             .withBean(DeviceRegistryService.class, () -> mock(DeviceRegistryService.class))
             .withBean(DeviceQueryService.class, () -> mock(DeviceQueryService.class))
+            .withBean(ChimeService.class, () -> mock(ChimeService.class))
             .withBean(FormatConverter.class, () -> mock(FormatConverter.class))
             .withPropertyValues(
                     "multiroom.tts.providers[0].name=openai",

@@ -938,4 +938,24 @@ class TtsPropertiesValidationTest {
 
         propertiesWithPlayback(playback).validate();
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"", " "})
+    void abortsWhenPlaybackChimeIsBlank(String value) {
+        PlaybackProperties playback = new PlaybackProperties();
+        playback.setChime(value);
+
+        assertThatThrownBy(propertiesWithPlayback(playback)::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("playback.chime");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"none", "ding", "not-loaded-yet"})
+    void acceptsAnyNonBlankPlaybackChime(String value) {
+        PlaybackProperties playback = new PlaybackProperties();
+        playback.setChime(value);
+
+        propertiesWithPlayback(playback).validate();
+    }
 }

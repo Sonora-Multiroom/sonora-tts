@@ -2,6 +2,7 @@ package multiroom.tts.service;
 
 import multiroom.api.exceptions.ExpectedRouteRefusalException;
 import multiroom.api.exceptions.RouteAdmissionException;
+import multiroom.api.model.ChimeInfo;
 import multiroom.api.model.GroupId;
 import multiroom.api.model.InputId;
 import multiroom.api.model.OutputGroup;
@@ -9,6 +10,7 @@ import multiroom.api.model.OutputId;
 import multiroom.api.model.RouteOptions;
 import multiroom.api.model.SampleFormat;
 import multiroom.api.model.TargetType;
+import multiroom.api.services.ChimeService;
 import multiroom.api.services.DeviceQueryService;
 import multiroom.api.services.DeviceRegistryService;
 import multiroom.api.services.RouteService;
@@ -42,6 +44,8 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -77,6 +81,7 @@ public class TtsService implements SmartLifecycle {
     private final DeviceRegistryService deviceRegistryService;
     private final DeviceQueryService deviceQueryService;
     private final RouteService routeService;
+    private final ChimeService chimeService;
     private final PlaybackCompletionListener completionListener;
     private final AnnouncementQueueManager queueManager;
     private final TtsMetrics metrics;
@@ -84,8 +89,8 @@ public class TtsService implements SmartLifecycle {
     public TtsService(TtsProperties properties, ProviderRegistry providerRegistry, AudioConverter audioConverter,
                        AudioCache audioCache, TtsInputResolver inputResolver,
                        DeviceRegistryService deviceRegistryService, DeviceQueryService deviceQueryService,
-                       RouteService routeService, PlaybackCompletionListener completionListener,
-                       TtsMetrics metrics) {
+                       RouteService routeService, ChimeService chimeService,
+                       PlaybackCompletionListener completionListener, TtsMetrics metrics) {
         this.properties = properties;
         this.providerRegistry = providerRegistry;
         this.audioConverter = audioConverter;
@@ -94,10 +99,17 @@ public class TtsService implements SmartLifecycle {
         this.deviceRegistryService = deviceRegistryService;
         this.deviceQueryService = deviceQueryService;
         this.routeService = routeService;
+        this.chimeService = chimeService;
         this.completionListener = completionListener;
         this.metrics = metrics;
         this.queueManager = new AnnouncementQueueManager(properties.getQueue().getMaxDepthPerTarget(),
                 this::activate);
+        // The hub loads its chimes before its ChimeService exists, so this in-process check is final
+        String defaultChime = properties.getPlayback().getChime();
+        if (defaultChime != null && !isKnownChime(defaultChime)) {
+            log.warn("TTS_DEFAULT_CHIME_UNKNOWN chime={} loaded={}: announcements play without it",
+                    defaultChime, loadedChimes());
+        }
     }
 
     /**
@@ -195,6 +207,7 @@ public class TtsService implements SmartLifecycle {
         Integer routeVolume = command.routeVolume() != null
                 ? command.routeVolume() : properties.getPlayback().getRouteVolume();
         Double duckingLevelDb = resolveDuckingLevel(playbackMode, command.duckingLevelDb());
+        String chime = resolveChime(command.chime());
         validateTargetExists(command.targetType(), command.targetName());
 
         ResolvedAudio resolved = resolveAudio(command.text(), command.providerName(), command.voice(),
@@ -231,7 +244,7 @@ public class TtsService implements SmartLifecycle {
         InputId inputId = InputId.of("tts-" + announcementId);
         AnnouncementTask task = new AnnouncementTask(announcementId, inputId, command.targetType(),
                 command.targetName(), audioFile, temporaryFile,
-                playbackMode, temporaryFile ? null : cacheKey, routeVolume, duckingLevelDb);
+                playbackMode, temporaryFile ? null : cacheKey, routeVolume, duckingLevelDb, chime);
 
         String queueKey = queueKey(command.targetType(), command.targetName());
         int queueDepth;
@@ -352,6 +365,7 @@ public class TtsService implements SmartLifecycle {
                     .joinMode(task.playbackMode().joinMode())
                     .routeVolume(task.routeVolume())
                     .duckingLevelDb(task.duckingLevelDb())
+                    .chime(task.chime())
                     .build();
             if (task.targetType() == TargetType.SINGLE_OUTPUT) {
                 routeService.createRoute(task.inputId(), OutputId.of(task.targetName()), options);
@@ -425,6 +439,34 @@ public class TtsService implements SmartLifecycle {
             return null;
         }
         return requested != null ? requested : properties.getPlayback().getDuckingLevelDb();
+    }
+
+    /**
+     * A requested chime is checked now, against the hub's loaded chimes, because the route is created
+     * later on the queue worker, where the hub's refusal could no longer reach the caller. A configured
+     * default the hub has not loaded is dropped (warned about at start-up), so a missing sound file does
+     * not silence every announcement.
+     */
+    private String resolveChime(String requested) {
+        if (requested != null) {
+            if (!isKnownChime(requested)) {
+                throw new TtsException(TtsErrorCode.INVALID_REQUEST, requested.isBlank()
+                        ? "chime must not be blank; leave it out for no opinion, or use '" + RouteOptions.NO_CHIME + "'"
+                        : "Unknown chime '" + requested + "'. Loaded: " + loadedChimes());
+            }
+            return requested;
+        }
+        String configured = properties.getPlayback().getChime();
+        return configured != null && isKnownChime(configured) ? configured : null;
+    }
+
+    private boolean isKnownChime(String id) {
+        return RouteOptions.NO_CHIME.equals(id) || chimeService.exists(id);
+    }
+
+    private String loadedChimes() {
+        return Stream.concat(chimeService.chimes().stream().map(ChimeInfo::id), Stream.of(RouteOptions.NO_CHIME))
+                .collect(Collectors.joining(", "));
     }
 
     private PlaybackMode resolvePlaybackMode(String requested) {

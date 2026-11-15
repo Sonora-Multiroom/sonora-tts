@@ -82,6 +82,11 @@ public class TtsProperties {
         if (duckingLevel != null && !(duckingLevel >= -60.0 && duckingLevel <= 0.0)) {
             throw fault("playback.ducking-level-db must be between -60.0 and 0.0, got " + duckingLevel);
         }
+        // Whether the id is loaded is the hub's to say, and a chime that failed to load must not stop
+        // the host, so only a blank value is refused here
+        if (playback.getChime() != null && playback.getChime().isBlank()) {
+            throw fault("playback.chime must not be blank; leave it out for no opinion, or use 'none'");
+        }
 
         Set<String> seenNames = new HashSet<>();
         Set<String> enabledNames = new HashSet<>();

@@ -6,6 +6,7 @@ import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import multiroom.api.conversion.FormatConverter;
 import multiroom.api.model.AudioOutputDefinition;
+import multiroom.api.model.ChimeInfo;
 import multiroom.api.model.GroupId;
 import multiroom.api.model.InputId;
 import multiroom.api.model.OutputGroup;
@@ -20,6 +21,7 @@ import multiroom.api.model.RouteOptions;
 import multiroom.api.model.RouteStatus;
 import multiroom.api.model.SampleFormat;
 import multiroom.api.model.TargetType;
+import multiroom.api.services.ChimeService;
 import multiroom.api.services.DeviceQueryService;
 import multiroom.api.services.DeviceRegistryService;
 import multiroom.api.services.RouteService;
@@ -108,6 +110,7 @@ class TtsServiceTest {
     private DeviceRegistryService deviceRegistryService;
     private DeviceQueryService deviceQueryService;
     private RouteService routeService;
+    private ChimeService chimeService;
     private AudioCache audioCache;
     private TtsInputResolver inputResolver;
     private PlaybackCompletionListener completionListener;
@@ -126,6 +129,9 @@ class TtsServiceTest {
         deviceRegistryService = mock(DeviceRegistryService.class);
         deviceQueryService = mock(DeviceQueryService.class);
         routeService = mock(RouteService.class);
+        chimeService = mock(ChimeService.class);
+        when(chimeService.exists("ding")).thenReturn(true);
+        when(chimeService.chimes()).thenReturn(List.of(new ChimeInfo("ding", 600)));
         audioCache = mock(AudioCache.class);
         inputResolver = mock(TtsInputResolver.class);
         completionListener = mock(PlaybackCompletionListener.class);
@@ -196,7 +202,7 @@ class TtsServiceTest {
     /** The one place a {@code TtsService} is built, so a new collaborator is added once. */
     private TtsService newService(TtsProperties properties, ProviderRegistry registry) {
         return new TtsService(properties, registry, audioConverter, audioCache, inputResolver,
-                deviceRegistryService, deviceQueryService, routeService, completionListener, metrics);
+                deviceRegistryService, deviceQueryService, routeService, chimeService, completionListener, metrics);
     }
 
     @Test
@@ -1907,6 +1913,97 @@ class TtsServiceTest {
                     .thenAnswer(inv -> DefaultSettingsResolution.resolve(config, inv.getArgument(0)));
         }
         return new ProviderRegistry(providers, "openai");
+    }
+
+    // ─── chime (HUB-040) ──────────────────────────────────────────────────────
+
+    private AnnounceCommand speakWithChime(String chime) {
+        return new AnnounceCommand("Dinner is ready", "living-room", TargetType.SINGLE_OUTPUT, null, null, null,
+                null, null, null, null, null, null, null, chime);
+    }
+
+    private TtsProperties propertiesWithChime(String chime) {
+        TtsProperties properties = propertiesWithPlayback(null, null);
+        properties.getPlayback().setChime(chime);
+        return properties;
+    }
+
+    @Test
+    void noChimeAnywhereLeavesItToTheHub() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        service.speak(speakWithChime(null));
+
+        assertThat(routeOptionsOfTheStartedAnnouncement().getChime()).isNull();
+    }
+
+    @Test
+    void aRequestedChimeGoesToTheRouteOptions() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        service.speak(speakWithChime("ding"));
+
+        assertThat(routeOptionsOfTheStartedAnnouncement().getChime()).isEqualTo("ding");
+    }
+
+    @Test
+    void theConfiguredChimeAppliesWhenTheRequestNamesNone() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsProperties properties = propertiesWithChime("ding");
+        TtsService service = newService(properties, registryFor(properties));
+
+        service.speak(speakWithChime(null));
+
+        assertThat(routeOptionsOfTheStartedAnnouncement().getChime()).isEqualTo("ding");
+    }
+
+    @Test
+    void aRequestedNoneWinsOverTheConfiguredChime() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsProperties properties = propertiesWithChime("ding");
+        TtsService service = newService(properties, registryFor(properties));
+
+        service.speak(speakWithChime("none"));
+
+        assertThat(routeOptionsOfTheStartedAnnouncement().getChime()).isEqualTo("none");
+    }
+
+    @Test
+    void aConfiguredChimeTheHubHasNotLoadedIsNotSent() throws Exception {
+        when(audioCache.get(any())).thenReturn(Optional.of(java.nio.file.Path.of("cache/hit.wav")));
+        TtsProperties properties = propertiesWithChime("gong");
+        TtsService service = newService(properties, registryFor(properties));
+
+        service.speak(speakWithChime(null));
+
+        assertThat(routeOptionsOfTheStartedAnnouncement().getChime()).isNull();
+    }
+
+    @Test
+    void anUnknownRequestedChimeIsRefusedBeforeAnythingIsSynthesizedOrQueued() {
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        assertThatThrownBy(() -> service.speak(speakWithChime("gong")))
+                .isInstanceOf(TtsException.class)
+                .satisfies(e -> assertThat(((TtsException) e).getErrorCode()).isEqualTo(TtsErrorCode.INVALID_REQUEST))
+                .hasMessage("Unknown chime 'gong'. Loaded: ding, none");
+
+        verifyNoInteractions(openaiProvider, piperProvider);
+        verify(audioCache, never()).get(any());
+        verifyNoInteractions(routeService);
+    }
+
+    @Test
+    void aBlankRequestedChimeIsRefused() {
+        TtsService service = serviceWith(providerConfig("openai", "alloy", "en-US", "tts-1"));
+
+        assertThatThrownBy(() -> service.speak(speakWithChime(" ")))
+                .isInstanceOf(TtsException.class)
+                .satisfies(e -> assertThat(((TtsException) e).getErrorCode()).isEqualTo(TtsErrorCode.INVALID_REQUEST))
+                .hasMessageContaining("must not be blank");
+        verifyNoInteractions(routeService);
     }
 
     // --- TTS-010: warming the cache without playback ---------------------------------------------
