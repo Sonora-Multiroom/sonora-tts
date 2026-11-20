@@ -53,7 +53,7 @@ reaches the hub as `RouteOptions.chime`. This replaces the backlog item `adopt-r
 - [X] Check against `ChimeService`: 400 for an unknown requested id, drop an unknown default with a start-up WARN
 - [X] Tests: request, default, `none` beats the default, unknown default not sent, unknown or blank request is 400, controller mapping, config validation
 - [X] Docs, `AGENTS.md`, master spec, plan and changelog; delete the backlog item
-- [ ] Move `HUB_REF` to the hub's merge commit once HUB-040 is merged to master
+- [X] Move `HUB_REF` to the hub's merge commit once HUB-040 is merged to master
 - [X] On the Pi (with permission): deploy, then a `piper-local` announcement on `office` with and without a chime
 
 ## Done When

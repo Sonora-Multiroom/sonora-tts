@@ -10,7 +10,7 @@ env:
   # multiroom-api and the starter parent are never published; they are built from the private
   # hub repository at the commit whose version matches this pom's <parent> version (0.1.34).
   # When the parent version is raised, move this to the last hub commit of the new version.
-  HUB_REF: f4f8e0d7f1f50e92b21973962194d0bb2f77f59b
+  HUB_REF: ee71a1eddbf400860a58ee9ffd81b603a4e3ba32
 
 jobs:
   verify:
