@@ -45,5 +45,10 @@ public record SpeakRequest(
                 + "Accepted only with playbackMode duck-others (400 with mix). Omitted: "
                 + "tts.playback.ducking-level-db, else the hub's input default and system level")
         @DecimalMin(value = "-60.0", message = "duckingLevelDb must be at least -60.0")
-        @DecimalMax(value = "0.0", message = "duckingLevelDb must be at most 0.0") Double duckingLevelDb) {
+        @DecimalMax(value = "0.0", message = "duckingLevelDb must be at most 0.0") Double duckingLevelDb,
+        @Schema(description = "Chime that starts this announcement: the id of a chime the hub has loaded "
+                + "(GET /api/v2/chimes), or none for no chime. An unknown id answers 400 INVALID_REQUEST. "
+                + "The hub skips it when every target output is already playing. Omitted: "
+                + "tts.playback.chime, else the target's own chime setting")
+        String chime) {
 }

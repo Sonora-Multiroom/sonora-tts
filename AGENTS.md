@@ -39,7 +39,11 @@ edit it from here.**
 3. After the host is rebuilt, rebuild and redeploy this JAR. Incompatibility shows up only at
    runtime (`Require-API-Version` → `SemanticVersion.isCompatibleWith`), and a stale JAR beside a
    rebuilt core is a known silent failure (2026-09-13: all four extensions dropped out at once).
-4. The extension requires `multiroom-api` 0.1.33 (`multiroom.require_api_version`): a speak request's
+4. The extension requires `multiroom-api` 0.1.34 (`multiroom.require_api_version`): a speak request's
+   `chime` and the `tts.playback.chime` default reach the hub as `RouteOptions.chime` (HUB-040, TTS
+   0.1.13); a requested id is checked against `ChimeService` when the request arrives, because the route
+   is created later on the queue worker, and a configured one the hub has not loaded is dropped. A speak
+   request's
    `routeVolume` and `duckingLevelDb`, and the `tts.playback` defaults for both, reach the hub through
    `RouteService.createRoute(…, RouteOptions)` (0.1.29). A ducking level is sent only for `duck-others`.
    Since 0.1.33 (hub feature 037, TTS 0.1.12) an announcement overtaken by a newer command or by the end

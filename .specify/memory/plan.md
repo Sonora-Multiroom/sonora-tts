@@ -36,6 +36,10 @@
 > `multiroom.require_api_version` raised to 0.1.33 (manifest `[0.1.33,0.2.0)`) for
 > `ExpectedRouteRefusalException`, logged `TTS_PLAYBACK_OVERTAKEN` at DEBUG; CI hub pin moved to a
 > 0.1.33 commit; version 0.1.12.
+> **Revision**: 2026-11-15 — HUB-040 adoption (no feature number): `chime` on the speak request and
+> the `playback.chime` key, passed as `RouteOptions.chime`; `ChimeService` injected into `TtsService`;
+> starter parent and `multiroom.require_api_version` raised to 0.1.34 (manifest `[0.1.34,0.2.0)`); CI
+> hub pin moved to a 0.1.34 commit; version 0.1.13.
 
 How this repository is built and how it docks onto the host, as implemented. Feature-level
 planning lives under [specs/](../../specs/). Folded in below: `001-tts-extension`
@@ -56,8 +60,8 @@ A single Maven module producing one shaded JAR, `multiroom-tts.jar`, dropped int
 `extensions/` directory.
 
 ```text
-pom.xml                    # parent: ai.multiroom:multiroom-extension-starter:0.1.33 (since 0.1.12),
-                           #   <relativePath/> EMPTY; multiroom.require_api_version 0.1.33
+pom.xml                    # parent: ai.multiroom:multiroom-extension-starter:0.1.34 (since 0.1.13),
+                           #   <relativePath/> EMPTY; multiroom.require_api_version 0.1.34
 src/main/java/multiroom/tts/
 ├── TtsAutoConfiguration.java  # the entry point — @AutoConfiguration,
 │                              #   @ConditionalOnProperty("multiroom.tts.enabled", matchIfMissing),
@@ -132,7 +136,7 @@ The manifest, written by the inherited parent POM, carries `Extension-Id: tts`,
 
 | Dependency | Scope | Why |
 |---|---|---|
-| `multiroom-api` 0.1.33 | `provided` (from the parent) | The whole contract: routing, device registry, `TargetType`, `RouteDestroyedEvent`, `FormatConverter`; since 006 `RouteJoinMode`, `RouteAdmissionException` and the three-argument `createRoute` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"]; since 009 `RouteOptions` and the `RouteOptions` overloads of `createRoute` [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", pom.xml row]; since 0.1.12 `ExpectedRouteRefusalException` (HUB-037) |
+| `multiroom-api` 0.1.34 | `provided` (from the parent) | The whole contract: routing, device registry, `TargetType`, `RouteDestroyedEvent`, `FormatConverter`; since 006 `RouteJoinMode`, `RouteAdmissionException` and the three-argument `createRoute` [Source: .specify/archive/006-announcement-ducking/plan.md -> "Primary Dependencies"]; since 009 `RouteOptions` and the `RouteOptions` overloads of `createRoute` [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", pom.xml row]; since 0.1.12 `ExpectedRouteRefusalException` (HUB-037); since 0.1.13 `RouteOptions.chime` and `ChimeService` (HUB-040) |
 | `spring-boot-starter-web`, `-validation`, Jackson | `provided` | Supplied by the host at runtime; bundling risks a class collision with another extension |
 | `spring-boot-configuration-processor` | `provided`, optional | Configuration metadata for `multiroom.tts.*` |
 | `swagger-annotations-jakarta` 2.2.47 | `provided` | `@Operation` / `@ApiResponse` for springdoc; pinned to the copy `multiroom-rest` ships, never bundled |
@@ -154,7 +158,8 @@ deploy the host first [Source: .specify/archive/006-announcement-ducking/researc
 both again to 0.1.29 (manifest `Require-API-Version: [0.1.29,0.2.0)`) for `RouteOptions`; the host
 needs multiroom-ai 034 [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", pom.xml row].
 0.1.12 raised both to 0.1.33 (manifest `[0.1.33,0.2.0)`) to catch `ExpectedRouteRefusalException`; the
-host needs HUB-037, deployed first.
+host needs HUB-037, deployed first. 0.1.13 raised both to 0.1.34 (manifest `[0.1.34,0.2.0)`) for
+`RouteOptions.chime` and `ChimeService`; the host needs HUB-040.
 
 ## Configuration
 
@@ -177,6 +182,7 @@ host needs HUB-037, deployed first.
 | `playback.default-mode` | `duck-others` | Since 006: the playback mode of every announcement whose request names none; `duck-others` or `mix`, case-insensitive; one value for the whole extension. Bound as a `String` and checked in `TtsProperties.validate()`; anything else (`replace` included) aborts start-up: `multiroom-tts: playback.default-mode '<v>' is not one of duck-others, mix` [Source: .specify/archive/006-announcement-ducking/contracts/configuration.md -> "`multiroom.tts.playback`"] |
 | `playback.route-volume` | unset | Since 009: volume 0-100 of every announcement whose request names none; replaces the target outputs' volume for the announcement only. Bound as `Integer`; outside 0-100 aborts start-up in `TtsProperties.validate()` [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", PlaybackProperties row] |
 | `playback.ducking-level-db` | unset | Since 009: ducking level in dB, -60.0 to 0.0, for `duck-others` announcements whose request names none; never sent for `mix`. Bound as `Double`; outside the range aborts start-up [Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", PlaybackProperties row] |
+| `playback.chime` | unset | Since 0.1.13 (HUB-040): chime id or `none` for every announcement whose request names none. Bound as `String`; blank aborts start-up in `TtsProperties.validate()`. Whether the id is loaded is not a start-up fault (a chime that fails to load must not stop the host): `TtsService`'s constructor logs `TTS_DEFAULT_CHIME_UNKNOWN` at WARN and the value is not sent |
 | `voice-catalogue.ttl` | `24h` | Per Google entry's own catalogue (`google-gemini` too, since 004) |
 | `voice-catalogue.failure-backoff` | `60s` | No refetch after a failure for this long; also the minimum age before a miss refetches. Since 003, also the token service's back-off |
 | `voice-catalogue.fetch-timeout` | `3s` | Cap on one fetch, inside the entry's `timeout-seconds` |
@@ -245,7 +251,10 @@ synthesis, and not part of the cache identity); the response is unchanged
 either: `POST /api/tts/speak` takes an optional `routeVolume` (0-100) and `duckingLevelDb` (-60.0 to
 0.0, `duck-others` only); a value out of range, or a level with `mix`, is 400 `INVALID_REQUEST`
 before the target lookup and any synthesis, and neither is part of the cache identity
-[Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", SpeakRequest row]. The published REST contract file stays 006's v0.1.5.
+[Source: .specify/archive/009-route-volume-ducking-level/plan.md -> "Approach", SpeakRequest row]. Since 0.1.13 it also takes an optional `chime` (a loaded chime id or
+`none`), checked against `ChimeService` before the target lookup and any synthesis (400 `INVALID_REQUEST`
+naming the loaded chimes), because the route is created later on the queue worker where the hub's own
+`IllegalArgumentException` could no longer reach the caller; not part of the cache identity. The published REST contract file stays 006's v0.1.5.
 
 Deliberately not under `/api/v2/**` (`multiroom-rest`'s contract with `sonora-cli` and
 `sonora-mcp`), and deliberately not RFC 7807 for the same reason. Current contract, versioned with

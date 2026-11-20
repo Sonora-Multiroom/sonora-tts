@@ -26,7 +26,7 @@ public class TtsController implements TtsApi {
                 request.text(), request.targetName(), request.targetType(),
                 request.providerName(), request.voice(), request.language(),
                 request.engine(), request.pitch(), request.speakingRate(), request.stylePrompt(),
-                request.playbackMode(), request.routeVolume(), request.duckingLevelDb()));
+                request.playbackMode(), request.routeVolume(), request.duckingLevelDb(), request.chime()));
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(new SpeakAcceptedResponse(result.announcementId(), result.cacheHit(), result.queueDepth()));
     }

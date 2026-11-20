@@ -4,6 +4,26 @@
 
 Newest first.
 
+### A Chime Before An Announcement (no feature number) — 2026-11-15
+**Branch:** `backlog-adopt-hub-040-chime` (adopts hub feature HUB-040)
+**Release:** `multiroom-tts` 0.1.13, requires `multiroom-api` 0.1.34 (HUB-040)
+
+**What changed:**
+
+- Optional `chime` on `POST /api/tts/speak` (a chime id from the hub's `GET /api/v2/chimes`, or
+  `none`), and `multiroom.tts.playback.chime` as its default; the request wins; with neither the target's
+  own chime setting decides. Passed to the hub as `RouteOptions.chime`
+- A requested id the hub has not loaded is 400 `INVALID_REQUEST` (`Unknown chime '<id>'. Loaded: …`)
+  before synthesis, checked against `ChimeService` because the route is created later on the queue worker
+- A configured id the hub has not loaded logs `TTS_DEFAULT_CHIME_UNKNOWN` at WARN at start-up and is not
+  sent; a blank one aborts start-up
+- Starter parent and `multiroom.require_api_version` raised to 0.1.34 (manifest `[0.1.34,0.2.0)`), CI
+  `HUB_REF` moved to the hub's 0.1.34 commit; backlog item `adopt-route-chime.md` deleted
+
+**Verification:** `mvn verify` 756 tests, 0 failures (2026-11-15); on the Pi 2026-11-15 with
+`piper-local` on `office`: an unknown chime answered 400, `tritone` played from the call level, `none`
+played without one
+
 ### Overtaken Announcements Logged Quietly (no feature number) — 2026-11-06
 **Branch:** `hub-037-expected-refusal-logs` (follows hub feature HUB-037)
 **Release:** `multiroom-tts` 0.1.12, requires `multiroom-api` 0.1.33 (HUB-037)

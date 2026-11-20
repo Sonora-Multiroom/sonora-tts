@@ -22,6 +22,14 @@ public class PlaybackProperties {
      */
     private Double duckingLevelDb;
 
+    /**
+     * Chime that starts every announcement (HUB-040, API 0.1.34): the id of a chime the hub has loaded,
+     * or {@code none} for no chime even where the target has one. {@code null}: no opinion, so the
+     * target's own chime setting decides. A speak request's {@code chime} wins. A configured id the hub
+     * has not loaded is logged at start-up and not sent, so announcements still play.
+     */
+    private String chime;
+
     /** Only call after {@link TtsProperties#validate()} has accepted {@link #defaultMode}. */
     public PlaybackMode resolvedDefaultMode() {
         return PlaybackMode.fromName(defaultMode).orElseThrow();
